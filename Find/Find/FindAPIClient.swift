@@ -46,6 +46,82 @@ final class FindAPIClient: @unchecked Sendable {
         return try await post(path: "find/search", payload: payload, responseType: FindSearchResponse.self)
     }
 
+    /// The same search, results first: `onEvent` gets the stage and the
+    /// early cards as they arrive; returns the full response (the same one
+    /// `search` returns). A backend that doesn't stream just sends that
+    /// response, which is read the same way.
+    func searchStream(
+        query: String,
+        context: String? = nil,
+        maxResults: Int = 10,
+        latitude: Double? = nil,
+        longitude: Double? = nil,
+        onEvent: @escaping @MainActor (FindSearchEvent) -> Void
+    ) async throws -> FindSearchResponse {
+        let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        let payload = FindSearchRequest(
+            query: trimmedQuery,
+            context: context?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty,
+            maxResults: min(max(maxResults, 1), 10),
+            postalCode: Self.extractPostalCode(from: trimmedQuery),
+            latitude: latitude,
+            longitude: longitude,
+            timeZone: TimeZone.current.identifier,
+            features: ["instant", "units"],
+            stream: true
+        )
+        var request = URLRequest(url: config.apiBaseURL.appending(path: "find/search"))
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("Bearer \(config.apiKey)", forHTTPHeaderField: "Authorization")
+        request.httpBody = try encoder.encode(payload)
+
+        let (bytes, response) = try await URLSession.shared.bytes(for: request)
+        guard let http = response as? HTTPURLResponse else { throw FindAPIError.invalidResponse }
+        guard (200..<300).contains(http.statusCode) else { throw FindAPIError.httpError(http.statusCode) }
+
+        for try await line in bytes.lines {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            guard !trimmed.isEmpty, let data = trimmed.data(using: .utf8),
+                  let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { continue }
+            switch object["type"] as? String {
+            case "stage":
+                let stage = object["stage"] as? String ?? "planning"
+                let pageCount = object["pageCount"] as? Int ?? 0
+                await onEvent(.stage(stage, pageCount: pageCount))
+            case "results":
+                // Shaped as a response so the result pages can show it as is.
+                let preview: [String: Any] = [
+                    "success": true,
+                    "query": object["query"] as? String ?? trimmedQuery,
+                    "normalizedQuery": object["query"] as? String ?? trimmedQuery,
+                    "queryType": object["queryType"] as? String ?? "entity",
+                    "shoppingIntent": object["shoppingIntent"] as? Bool ?? false,
+                    "results": object["results"] as? [Any] ?? [],
+                    "selectedIndex": 0,
+                ]
+                if let previewData = try? JSONSerialization.data(withJSONObject: preview),
+                   let decoded = try? decoder.decode(FindSearchResponse.self, from: previewData) {
+                    await onEvent(.results(decoded))
+                }
+            case "final":
+                guard let inner = object["response"] else { throw FindAPIError.invalidResponse }
+                let finalResponse = try decoder.decode(FindSearchResponse.self, from: try JSONSerialization.data(withJSONObject: inner))
+                await onEvent(.final(finalResponse))
+                return finalResponse
+            case "error":
+                throw FindAPIError.invalidResponse
+            default:
+                // A plain JSON reply from a backend that didn't stream.
+                let finalResponse = try decoder.decode(FindSearchResponse.self, from: data)
+                await onEvent(.final(finalResponse))
+                return finalResponse
+            }
+        }
+        // The connection ended before the full response.
+        throw FindAPIError.invalidResponse
+    }
+
     // Mirrors extractPostalCode() in the web app's find-experience.service.ts
     // so a bare ZIP in the query text (e.g. "weather 98106") reaches the
     // backend's weather fast-path the same way regardless of which client

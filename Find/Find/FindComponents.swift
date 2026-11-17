@@ -36,13 +36,31 @@ final class FindFeedbackStore: ObservableObject {
     }
 }
 
+/// Results first: true while the early cards show and the pages are still
+/// being checked. The rating row waits for the full response.
+private struct FindRefiningKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
+extension EnvironmentValues {
+    var findRefining: Bool {
+        get { self[FindRefiningKey.self] }
+        set { self[FindRefiningKey.self] = newValue }
+    }
+}
+
 struct FindFeedbackRow: View {
     @ObservedObject var store: FindFeedbackStore
     let query: String
     let queryType: FindQueryType
     var meta: String?
+    @Environment(\.findRefining) private var refining
 
     var body: some View {
+        if !refining { row }
+    }
+
+    private var row: some View {
         VStack(alignment: .leading, spacing: 10) {
             if store.isSent(query) {
                 Text("Thanks for the feedback.")

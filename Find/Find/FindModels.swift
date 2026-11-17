@@ -362,6 +362,17 @@ struct FindSearchRequest: Encodable {
     // backend leaves newer types out for app versions that can't.
     let timeZone: String
     let features: [String]
+    /// Results first: ask the backend for one message per line while it works.
+    var stream: Bool? = nil
+}
+
+/// What a streamed search sends while it works (results first): the stage
+/// it's on, the web search's cards before any page is checked, then the full
+/// response (web: FindSearchEvent in find-experience.service.ts).
+enum FindSearchEvent {
+    case stage(String, pageCount: Int)
+    case results(FindSearchResponse)
+    case final(FindSearchResponse)
 }
 
 enum FindFeedbackRating: String, Encodable, CaseIterable {

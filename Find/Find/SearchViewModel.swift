@@ -6,6 +6,11 @@ import CoreLocation
 final class SearchViewModel: ObservableObject {
     @Published var query = ""
     @Published var isLoading = false
+    /// Results first: cards are showing and Find is still checking their pages.
+    @Published private(set) var isRefining = false
+    @Published private(set) var searchStage = "planning"
+    @Published private(set) var checkingPageCount = 0
+    @Published private(set) var searchStartedAt = Date()
     @Published var errorMessage = ""
     @Published var searchResponse: FindSearchResponse?
     @Published var selectedResult: FindRankedResult?
@@ -150,9 +155,14 @@ final class SearchViewModel: ObservableObject {
         guard !trimmed.isEmpty else { return }
 
         isLoading = true
+        isRefining = false
+        searchStage = "planning"
+        checkingPageCount = 0
+        searchStartedAt = Date()
         errorMessage = ""
         summaryText = ""
         detectEntity(trimmed)
+        let thisSearch = searchID
 
         // Headlines from feeds the backend can't reach (ESPN, NPR) load on
         // the phone alongside the search, and are merged into an RSS response.
@@ -166,19 +176,39 @@ final class SearchViewModel: ObservableObject {
             : nil
 
         do {
-            var response = try await apiClient.search(
+            var response = try await apiClient.searchStream(
                 query: trimmed,
                 latitude: coordinate?.latitude,
                 longitude: coordinate?.longitude
-            )
+            ) { [weak self] event in
+                guard let self, self.searchID == thisSearch else { return }
+                switch event {
+                case .stage(let stage, let pageCount):
+                    self.searchStage = stage
+                    if stage == "checking" { self.checkingPageCount = pageCount }
+                case .results(let preview):
+                    self.applyResultsPreview(preview)
+                case .final:
+                    break
+                }
+            }
+            // A newer search started while this one ran.
+            guard searchID == thisSearch else { return }
+            // The card being read stays in front when the details arrive.
+            let readingURL = isRefining ? selectedResult?.url : nil
             if response.rssBacked == true {
                 response = HeadlineFeeds.merge(response, extra: await extraHeadlines)
             }
             let resolvedResponse = response.applyingLocalConversionFallback(to: trimmed)
             searchResponse = resolvedResponse
-            selectedResult = resolvedResponse.results.indices.contains(resolvedResponse.selectedIndex)
-                ? resolvedResponse.results[resolvedResponse.selectedIndex]
-                : resolvedResponse.results.first
+            isRefining = false
+            if let readingURL, let reading = resolvedResponse.results.first(where: { $0.url == readingURL }) {
+                selectedResult = reading
+            } else {
+                selectedResult = resolvedResponse.results.indices.contains(resolvedResponse.selectedIndex)
+                    ? resolvedResponse.results[resolvedResponse.selectedIndex]
+                    : resolvedResponse.results.first
+            }
             let answerText = resolvedResponse.answer?.text.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             viewingGroundedAnswer = resolvedResponse.queryType == .question
                 && !answerText.isEmpty
@@ -201,10 +231,38 @@ final class SearchViewModel: ObservableObject {
                 )
             }
         } catch {
-            errorMessage = error.localizedDescription
+            guard searchID == thisSearch else { return }
+            if isRefining {
+                // The cards stay; only the details didn't arrive.
+                isRefining = false
+            } else {
+                errorMessage = error.localizedDescription
+            }
         }
 
         isLoading = false
+    }
+
+    /// Results first: the web search's cards show while Find checks the
+    /// pages. Questions wait for their answer. Nothing is saved, rated or
+    /// awarded until the full response arrives (web: applyResultsPreview).
+    private func applyResultsPreview(_ preview: FindSearchResponse) {
+        guard isLoading, preview.queryType != .question, !preview.results.isEmpty else { return }
+        isLoading = false
+        isRefining = true
+        searchResponse = preview
+        selectedResult = preview.results.first
+        viewingGroundedAnswer = false
+    }
+
+    /// What a running search is doing, from the backend's own progress messages.
+    var searchStageText: String {
+        if searchStage == "checking" {
+            return checkingPageCount > 0
+                ? "Checking \(checkingPageCount) \(checkingPageCount == 1 ? "page" : "pages")…"
+                : "Checking the results…"
+        }
+        return "Understanding your search…"
     }
 
     // MARK: Single-item results
@@ -301,6 +359,7 @@ final class SearchViewModel: ObservableObject {
         clearEntity()
         query = ""
         isLoading = false
+        isRefining = false
         errorMessage = ""
         searchResponse = nil
         selectedResult = nil
