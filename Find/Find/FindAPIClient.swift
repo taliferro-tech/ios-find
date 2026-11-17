@@ -71,6 +71,7 @@ final class FindAPIClient: @unchecked Sendable {
         maxResults: Int = 10,
         latitude: Double? = nil,
         longitude: Double? = nil,
+        dailyDate: String? = nil,
         onEvent: @escaping @MainActor (FindSearchEvent) -> Void
     ) async throws -> FindSearchResponse {
         let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -84,7 +85,8 @@ final class FindAPIClient: @unchecked Sendable {
             timeZone: TimeZone.current.identifier,
             features: ["instant", "units"],
             stream: true,
-            deviceId: FindDevice.id
+            deviceId: FindDevice.id,
+            dailyDate: dailyDate
         )
         var request = URLRequest(url: config.apiBaseURL.appending(path: "find/search"))
         request.httpMethod = "POST"
@@ -196,6 +198,20 @@ final class FindAPIClient: @unchecked Sendable {
         request.deviceId = FindDevice.id
         request.timeZone = TimeZone.current.identifier
         return try await post(path: "find/feedback", payload: request, responseType: FindFeedbackResponse.self).score
+    }
+
+    // MARK: Daily Find
+
+    func dailyFind() async throws -> FindDailyState {
+        try await post(path: "find/daily", payload: FindDailyRequest(deviceId: FindDevice.id, timeZone: TimeZone.current.identifier), responseType: FindDailyResponse.self).daily
+    }
+
+    func startDailyFind(date: String) async throws -> FindDailyState {
+        try await post(path: "find/daily/start", payload: FindDailyRequest(deviceId: FindDevice.id, timeZone: TimeZone.current.identifier, date: date), responseType: FindDailyResponse.self).daily
+    }
+
+    func answerDailyFind(date: String, choice: Int) async throws -> FindDailyState {
+        try await post(path: "find/daily/answer", payload: FindDailyRequest(deviceId: FindDevice.id, timeZone: TimeZone.current.identifier, date: date, choice: choice), responseType: FindDailyResponse.self).daily
     }
 
     // MARK: Find Score (all POSTs, so the device ID never lands in a URL)

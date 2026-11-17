@@ -157,6 +157,7 @@ struct AwardBadgeView: View {
         case .collector: return "rectangle.stack.fill"
         case .allCards: return "square.grid.2x2.fill"
         case .rank: return "chevron.up.2"
+        case .daily: return "calendar"
         }
     }
 }

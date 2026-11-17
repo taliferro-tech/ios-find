@@ -351,6 +351,51 @@ struct FindSearchResponse: Codable, Hashable {
     var instant: FindInstantAnswer? = nil
     /// What this search earned (Find Score), when the backend recorded it.
     var score: FindScoreAward? = nil
+    /// Daily Find: this search counted toward today's question.
+    var daily: FindDailySearch? = nil
+}
+
+// MARK: - Daily Find (backend findDaily.service.js; web find-daily.service.ts)
+
+struct FindDailySearch: Codable, Hashable {
+    let date: String
+    let searches: Int
+}
+
+struct FindDailyResult: Codable, Hashable {
+    let choice: Int
+    let correct: Bool
+    let answerIndex: Int
+    let points: Int
+    let beat: Int?
+    let explanation: String
+    let sourceUrl: String
+    let sourceTitle: String
+}
+
+struct FindDailyState: Codable, Hashable {
+    let available: Bool
+    let date: String
+    var question: String? = nil
+    /// "new", "playing" or "answered".
+    var status: String? = nil
+    var searches: Int? = nil
+    /// Only after the first search.
+    var choices: [String]? = nil
+    var result: FindDailyResult? = nil
+    /// What answering earned (Find Score), on the answer reply only.
+    var score: FindScoreAward? = nil
+}
+
+struct FindDailyRequest: Encodable {
+    let deviceId: String
+    let timeZone: String
+    var date: String? = nil
+    var choice: Int? = nil
+}
+
+struct FindDailyResponse: Decodable {
+    let daily: FindDailyState
 }
 
 struct FindSearchRequest: Encodable {
@@ -368,6 +413,8 @@ struct FindSearchRequest: Encodable {
     var stream: Bool? = nil
     /// Find Score: the backend adds this phone's points for the search.
     var deviceId: String? = nil
+    /// Daily Find: a search made while playing today's question.
+    var dailyDate: String? = nil
 }
 
 /// What a streamed search sends while it works (results first): the stage

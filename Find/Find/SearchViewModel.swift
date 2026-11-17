@@ -37,6 +37,8 @@ final class SearchViewModel: ObservableObject {
     private var searchID = UUID()
 
     let feedbackStore: FindFeedbackStore
+    /// Daily Find: today's question (searches while playing count toward it).
+    let dailyStore: FindDailyStore
     private let apiClient: FindAPIClient
     private let awardsService: FindAwardsService
     private let locationService: FindLocationService
@@ -141,6 +143,7 @@ final class SearchViewModel: ObservableObject {
     init(apiClient: FindAPIClient, awardsService: FindAwardsService, locationService: FindLocationService) {
         self.apiClient = apiClient
         self.feedbackStore = FindFeedbackStore(apiClient: apiClient)
+        self.dailyStore = FindDailyStore(apiClient: apiClient)
         self.awardsService = awardsService
         self.locationService = locationService
         // A rating's points (Find Score) can unlock a rank or badge too.
@@ -153,6 +156,13 @@ final class SearchViewModel: ObservableObject {
 
     func dismissAwardUnlock() {
         pendingAwardUnlock = nil
+    }
+
+    /// Daily Find answered: its points and badges go through the unlock overlay.
+    func applyDailyScore(_ score: FindScoreAward?) {
+        if let unlocked = awardsService.applyAward(score), pendingAwardUnlock == nil {
+            pendingAwardUnlock = unlocked
+        }
     }
 
     func runSearch() async {
@@ -184,7 +194,8 @@ final class SearchViewModel: ObservableObject {
             var response = try await apiClient.searchStream(
                 query: trimmed,
                 latitude: coordinate?.latitude,
-                longitude: coordinate?.longitude
+                longitude: coordinate?.longitude,
+                dailyDate: dailyStore.playingDate
             ) { [weak self] event in
                 guard let self, self.searchID == thisSearch else { return }
                 switch event {
@@ -223,6 +234,7 @@ final class SearchViewModel: ObservableObject {
             if FindActivityMonitor.shared.mode == .driving, let answer = FindSiriAnswer(response: resolvedResponse) {
                 FindSpeaker.shared.speak(answer.spoken)
             }
+            dailyStore.noteSearch(resolvedResponse.daily)
             // Find Score: the backend's points when it scored the search,
             // else the old on-device count.
             if let score = resolvedResponse.score {
@@ -421,6 +433,7 @@ private extension FindSearchResponse {
         )
         // What the search earned (Find Score) still counts.
         converted.score = score
+        converted.daily = daily
         return converted
     }
 }
