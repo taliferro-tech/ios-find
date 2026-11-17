@@ -44,28 +44,23 @@ struct FindFeedbackRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 8) {
-                if store.isSent(query) {
-                    Text("Thanks for the feedback.")
-                        .font(Theme.font(13))
-                        .foregroundStyle(Theme.muted)
-                } else {
-                    Text("Right find?")
-                        .font(Theme.font(13))
-                        .foregroundStyle(Theme.muted)
-                        .padding(.trailing, 4)
-                    ForEach(FindFeedbackRating.allCases, id: \.self) { rating in
-                        Button {
-                            store.send(rating, query: query, queryType: queryType)
-                        } label: {
-                            Text(rating.label)
-                                .font(Theme.font(13, weight: .semibold))
-                                .foregroundStyle(Theme.text)
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 6)
-                                .background(Theme.surface, in: Capsule())
-                        }
-                        .buttonStyle(.plain)
+            if store.isSent(query) {
+                Text("Thanks for the feedback.")
+                    .font(Theme.font(13))
+                    .foregroundStyle(Theme.muted)
+            } else {
+                // One row when it fits; on narrow phones (320pt / Display
+                // Zoom) the prompt moves above the pills instead of the pills
+                // squeezing and breaking mid-word ("Exce / llent"). Matches
+                // the web footer, which flex-wraps.
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 8) {
+                        prompt.padding(.trailing, 4)
+                        pills
+                    }
+                    VStack(alignment: .leading, spacing: 8) {
+                        prompt
+                        HStack(spacing: 8) { pills }
                     }
                 }
             }
@@ -76,6 +71,33 @@ struct FindFeedbackRow: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var prompt: some View {
+        Text("Right find?")
+            .font(Theme.font(13))
+            .foregroundStyle(Theme.muted)
+            .lineLimit(1)
+            .fixedSize()
+    }
+
+    @ViewBuilder
+    private var pills: some View {
+        ForEach(FindFeedbackRating.allCases, id: \.self) { rating in
+            Button {
+                store.send(rating, query: query, queryType: queryType)
+            } label: {
+                Text(rating.label)
+                    .font(Theme.font(13, weight: .semibold))
+                    .foregroundStyle(Theme.text)
+                    .lineLimit(1)
+                    .fixedSize()
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(Theme.surface, in: Capsule())
+            }
+            .buttonStyle(.plain)
+        }
     }
 }
 
