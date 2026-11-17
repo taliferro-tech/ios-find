@@ -1,12 +1,48 @@
 import Foundation
 import Combine
 
-// Mirrors the web app's src/app/services/find-awards.service.ts exactly -
-// same 10-award ladder, same thresholds, same copy, same Night Owl / Early
-// Bird resolve-once-and-keep-it behavior. Storage is UserDefaults instead of
-// localStorage (no cross-platform sync intended - just the same shape).
+// Mirrors the web app's src/app/services/find-awards.service.ts. Find Score
+// (2026-11-17): the backend awards every point and badge; this keeps the
+// latest profile (cached in UserDefaults so the rank shows right away) and
+// turns what a search, rating or card earned into the unlock overlay.
+//
+// The old on-device ladder (10 awards by search count) is still counted
+// until the backend has taken it over (imported), and shown when the
+// backend can't be reached, so nobody sees their awards vanish.
 enum FindAwardIcon: String, Codable {
     case rebel, curious, nightOwl, earlyBird, connector, sharpEye, explorer, specialist, relentless, tastemaker, legend
+    case streak, collector, allCards, rank
+
+    /// The backend's icon names ("night-owl", "all-cards").
+    init(backend name: String) {
+        switch name {
+        case "rebel": self = .rebel
+        case "curious": self = .curious
+        case "night-owl": self = .nightOwl
+        case "early-bird": self = .earlyBird
+        case "connector": self = .connector
+        case "sharp-eye": self = .sharpEye
+        case "explorer": self = .explorer
+        case "specialist": self = .specialist
+        case "relentless": self = .relentless
+        case "tastemaker": self = .tastemaker
+        case "legend": self = .legend
+        case "streak": self = .streak
+        case "all-cards": self = .allCards
+        case "rank": self = .rank
+        default: self = .collector
+        }
+    }
+
+    var backendName: String {
+        switch self {
+        case .nightOwl: return "night-owl"
+        case .earlyBird: return "early-bird"
+        case .sharpEye: return "sharp-eye"
+        case .allCards: return "all-cards"
+        default: return rawValue
+        }
+    }
 }
 
 enum FindAwardState {
@@ -20,6 +56,8 @@ struct FindAward: Identifiable, Codable {
     var copy: String
     var icon: FindAwardIcon
     var hidden: Bool = false
+    /// Above the title in the unlock overlay ("NEW RANK"); nil = "AWARD UNLOCKED".
+    var eyebrow: String? = nil
 }
 
 struct FindAwardListItem: Identifiable {
@@ -27,6 +65,15 @@ struct FindAwardListItem: Identifiable {
     let title: String
     let icon: FindAwardIcon
     let state: FindAwardState
+    var group: String = "searches"
+    var goal: String? = nil
+    var copy: String = ""
+}
+
+struct FindAwardGroup: Identifiable {
+    let id: String
+    let title: String
+    let awards: [FindAwardListItem]
 }
 
 private struct FindAwardUnlockRecord: Codable {
@@ -40,6 +87,14 @@ private struct FindAwardUnlockRecord: Codable {
 final class FindAwardsService: ObservableObject {
     @Published private(set) var count: Int = 0
     @Published private var unlocked: [String: FindAwardUnlockRecord] = [:]
+    /// The Find Score profile as last seen; nil before the first one.
+    @Published private(set) var profile: FindScoreProfile?
+    /// What the shown result's search earned ("+12 points").
+    @Published private(set) var lastAward: FindScoreAward?
+
+    /// Set by the app once the API client exists.
+    var apiClient: FindAPIClient?
+    private var importChecked = false
 
     static let ladder: [FindAward] = [
         FindAward(id: "rebel", title: "The Rebel", threshold: 1,
@@ -64,36 +119,61 @@ final class FindAwardsService: ObservableObject {
                   icon: .legend, hidden: true),
     ]
 
+    private static let groupTitles = ["searches": "Searches", "streaks": "Streaks", "cards": "Cards", "daily": "Daily Find"]
+
     private let countKey = "find-awards-count"
     private let unlockedKey = "find-awards-unlocked"
+    private let profileKey = "find-score-profile"
 
     init() {
         load()
     }
 
     var awards: [FindAwardListItem] {
-        Self.ladder.map { award in
+        if let profile, !profile.badges.isEmpty {
+            return profile.badges.map(Self.listItem)
+        }
+        return Self.ladder.map { award in
             if let record = unlocked[award.id] {
-                return FindAwardListItem(id: award.id, title: record.title, icon: record.icon, state: .unlocked)
+                return FindAwardListItem(id: award.id, title: record.title, icon: record.icon, state: .unlocked, copy: record.copy)
             }
-            return FindAwardListItem(id: award.id, title: award.title, icon: award.icon, state: award.hidden ? .mystery : .locked)
+            return FindAwardListItem(id: award.id, title: award.title, icon: award.icon, state: award.hidden ? .mystery : .locked, copy: award.copy)
         }
     }
 
-    var totalCount: Int { Self.ladder.count }
+    var groups: [FindAwardGroup] {
+        var order: [String] = []
+        var byGroup: [String: [FindAwardListItem]] = [:]
+        for award in awards {
+            if byGroup[award.group] == nil { order.append(award.group) }
+            byGroup[award.group, default: []].append(award)
+        }
+        return order.map { FindAwardGroup(id: $0, title: Self.groupTitles[$0] ?? $0.capitalized, awards: byGroup[$0] ?? []) }
+    }
+
+    var totalCount: Int { awards.count }
 
     var unlockedCount: Int {
-        Self.ladder.filter { !$0.hidden && unlocked[$0.id] != nil }.count
+        awards.filter { $0.state == .unlocked }.count
     }
 
     var progressPercent: Double {
-        let trackable = Self.ladder.filter { !$0.hidden }.count
+        let trackable = awards.filter { $0.state != .mystery }.count
         return trackable == 0 ? 0 : Double(unlockedCount) / Double(trackable)
     }
 
-    /// Call once per completed search. Returns the award that was just unlocked, if any.
+    /// How far into the current rank, 0...1.
+    var rankProgress: Double {
+        guard let profile, let next = profile.rank.next else { return 1 }
+        let span = next.min - profile.rank.min
+        return span > 0 ? min(1, max(0, Double(profile.score - profile.rank.min) / Double(span))) : 1
+    }
+
+    /// The old on-device count, for a search the backend didn't score.
+    /// Returns the award that was just unlocked, if any.
     @discardableResult
     func recordSearch() -> FindAward? {
+        guard profile?.imported != true else { return nil }
         count += 1
         save()
 
@@ -106,6 +186,91 @@ final class FindAwardsService: ObservableObject {
         }
         if justUnlocked != nil { save() }
         return justUnlocked
+    }
+
+    /// Takes what a search, rating or card earned and returns what to show:
+    /// a new rank first, then a new badge, else nil. The first one each
+    /// launch also loads the whole profile (and hands over the old count).
+    func applyAward(_ award: FindScoreAward?) -> FindAward? {
+        guard let award else { return nil }
+        lastAward = award
+        if var current = profile {
+            let earned = Dictionary(award.newBadges.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+            current.score = award.total
+            current.weekScore = award.weekScore
+            current.rank = award.rank
+            current.streak.count = award.streak
+            current.streak.best = max(current.streak.best, award.streak)
+            current.badges = current.badges.map { badge in
+                guard var newer = earned[badge.id] else { return badge }
+                newer.state = "earned"
+                return newer
+            }
+            setProfile(current)
+        }
+        if !importChecked { Task { await refresh() } }
+        if let rankUp = award.rankUp {
+            let total = award.total.formatted()
+            let copy = award.rank.next.map { "\(total) points. \($0.toGo.formatted()) more to \($0.name)." } ?? "\(total) points. The top rank."
+            return FindAward(id: "rank-\(rankUp)", title: rankUp, threshold: 0, copy: copy, icon: .rank, eyebrow: "NEW RANK")
+        }
+        guard let badge = award.newBadges.first else { return nil }
+        return FindAward(id: badge.id, title: badge.title, threshold: 0, copy: badge.copy, icon: FindAwardIcon(backend: badge.icon))
+    }
+
+    func clearLastAward() {
+        lastAward = nil
+    }
+
+    /// Loads the profile from the backend; the first time, hands over the old count.
+    func refresh() async {
+        guard let apiClient else { return }
+        do {
+            var loaded = try await apiClient.scoreProfile()
+            importChecked = true
+            if !loaded.imported, count > 0 {
+                let badges = unlocked.map { FindScoreImportBadge(id: $0.key, title: $0.value.title, icon: $0.value.icon.backendName) }
+                if let imported = try? await apiClient.importAwards(count: count, badges: badges) {
+                    loaded = imported
+                }
+            }
+            setProfile(loaded)
+        } catch {
+            // Offline: keep showing the cached profile.
+        }
+    }
+
+    func setNickname(_ nickname: String) async throws {
+        guard let apiClient else { return }
+        setProfile(try await apiClient.setNickname(nickname))
+    }
+
+    func recoveryCode() async throws -> String {
+        guard let apiClient else { throw FindAPIError.invalidResponse }
+        return try await apiClient.recoveryCode()
+    }
+
+    func recover(code: String) async throws -> FindScoreProfile {
+        guard let apiClient else { throw FindAPIError.invalidResponse }
+        let moved = try await apiClient.recoverScore(code: code)
+        setProfile(moved)
+        return moved
+    }
+
+    private static func listItem(_ badge: FindScoreBadge) -> FindAwardListItem {
+        let state: FindAwardState = switch badge.state {
+        case "earned", nil: .unlocked
+        case "mystery": .mystery
+        default: .locked
+        }
+        return FindAwardListItem(id: badge.id, title: badge.title, icon: FindAwardIcon(backend: badge.icon), state: state, group: badge.group, goal: badge.goal, copy: badge.copy)
+    }
+
+    private func setProfile(_ profile: FindScoreProfile) {
+        self.profile = profile
+        if let data = try? JSONEncoder().encode(profile) {
+            UserDefaults.standard.set(data, forKey: profileKey)
+        }
     }
 
     private func resolveAward(_ award: FindAward) -> FindAward {
@@ -130,6 +295,10 @@ final class FindAwardsService: ObservableObject {
         if let data = UserDefaults.standard.data(forKey: unlockedKey),
            let decoded = try? JSONDecoder().decode([String: FindAwardUnlockRecord].self, from: data) {
             unlocked = decoded
+        }
+        if let data = UserDefaults.standard.data(forKey: profileKey),
+           let decoded = try? JSONDecoder().decode(FindScoreProfile.self, from: data) {
+            profile = decoded
         }
     }
 

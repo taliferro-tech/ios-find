@@ -51,10 +51,14 @@ struct FindEntityDetectRequest: Encodable {
     /// The cards this app draws; the backend sends no other kind (an app
     /// that sent none, up to 1.5, drew a blank card for anything new).
     let cardTypes: [String]
+    /// Find Score: a kind of card this player hasn't seen earns points.
+    var deviceId: String? = FindDevice.id
+    var timeZone: String? = TimeZone.current.identifier
 }
 
 struct FindEntityDetectResponse: Decodable {
     let entity: FindEntity?
+    var score: FindScoreAward? = nil
 }
 
 struct FindEntitySectionRequest: Encodable {

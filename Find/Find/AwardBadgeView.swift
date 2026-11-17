@@ -151,7 +151,12 @@ struct AwardBadgeView: View {
         case .specialist: return "diamond.fill"
         case .relentless: return "bolt.fill"
         case .tastemaker: return "star.fill"
-        case .legend: return "questionmark"
+        case .legend: return "crown.fill"
+        // Find Score badges (2026-11-17)
+        case .streak: return "flame.fill"
+        case .collector: return "rectangle.stack.fill"
+        case .allCards: return "square.grid.2x2.fill"
+        case .rank: return "chevron.up.2"
         }
     }
 }

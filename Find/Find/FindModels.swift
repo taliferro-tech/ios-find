@@ -349,6 +349,8 @@ struct FindSearchResponse: Codable, Hashable {
     // True for shopping searches; shows the 16Ahead Store strip under the result.
     var shoppingIntent: Bool? = nil
     var instant: FindInstantAnswer? = nil
+    /// What this search earned (Find Score), when the backend recorded it.
+    var score: FindScoreAward? = nil
 }
 
 struct FindSearchRequest: Encodable {
@@ -364,6 +366,8 @@ struct FindSearchRequest: Encodable {
     let features: [String]
     /// Results first: ask the backend for one message per line while it works.
     var stream: Bool? = nil
+    /// Find Score: the backend adds this phone's points for the search.
+    var deviceId: String? = nil
 }
 
 /// What a streamed search sends while it works (results first): the stage
@@ -386,10 +390,97 @@ struct FindFeedbackRequest: Encodable {
     let comment: String?
     let query: String?
     let queryType: String?
+    var deviceId: String? = nil
+    var timeZone: String? = nil
 }
 
 struct FindFeedbackResponse: Decodable {
     let success: Bool?
+    var score: FindScoreAward? = nil
+}
+
+// MARK: - Find Score (web: find-experience.service.ts; backend findScore.service.js)
+
+struct FindScoreBadge: Codable, Hashable, Identifiable {
+    let id: String
+    let group: String
+    var title: String
+    var copy: String
+    var icon: String
+    var hidden: Bool? = nil
+    var goal: String? = nil
+    var state: String? = nil
+    var earnedAt: Double? = nil
+}
+
+struct FindRankNext: Codable, Hashable {
+    let name: String
+    let min: Int
+    let toGo: Int
+}
+
+struct FindRank: Codable, Hashable {
+    let name: String
+    let min: Int
+    let level: Int
+    let next: FindRankNext?
+}
+
+/// What one search, rating or card earned.
+struct FindScoreAward: Codable, Hashable {
+    let points: Int
+    let total: Int
+    let weekScore: Int
+    let rank: FindRank
+    let rankUp: String?
+    let streak: Int
+    var usedFreeMiss: Bool? = nil
+    let newBadges: [FindScoreBadge]
+}
+
+struct FindScoreStreak: Codable, Hashable {
+    var count: Int
+    var best: Int
+    var lastDay: String
+}
+
+struct FindScoreProfile: Codable, Hashable {
+    var nickname: String
+    var hasNickname: Bool
+    let publicCode: String
+    var score: Int
+    var weekScore: Int
+    var rank: FindRank
+    var streak: FindScoreStreak
+    var searchCount: Int
+    var imported: Bool
+    var hasRecoveryCode: Bool
+    let shareUrl: String
+    var badges: [FindScoreBadge]
+}
+
+struct FindScoreRequest: Encodable {
+    let deviceId: String
+    var nickname: String? = nil
+    var code: String? = nil
+    var count: Int? = nil
+    var badges: [FindScoreImportBadge]? = nil
+    var timeZone: String? = nil
+    var ref: String? = nil
+}
+
+struct FindScoreImportBadge: Encodable {
+    let id: String
+    let title: String
+    let icon: String
+}
+
+struct FindScoreProfileResponse: Decodable {
+    let profile: FindScoreProfile
+}
+
+struct FindScoreRecoveryResponse: Decodable {
+    let code: String
 }
 
 /// A watched result (FindWatch in find-experience.service.ts).
@@ -440,6 +531,8 @@ struct FindShareRequest: Encodable {
     let url: String
     let displayUrl: String
     let imageUrl: String
+    /// Find Score: opens of the link earn this phone's player points.
+    var deviceId: String? = FindDevice.id
 }
 
 struct FindShareResponse: Decodable {

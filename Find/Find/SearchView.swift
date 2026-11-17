@@ -316,6 +316,29 @@ struct SearchView: View {
 
                 quickActionsGrid
 
+                // Find Score: rank and streak, opening Awards.
+                if let profile = awardsService.profile {
+                    Button {
+                        selectedTab = .awards
+                    } label: {
+                        HStack(spacing: 8) {
+                            Image(systemName: "rosette").foregroundStyle(Theme.accent)
+                            Text("\(profile.rank.name) · \(profile.score.formatted())")
+                                .foregroundStyle(Theme.text)
+                            if profile.streak.count > 1 {
+                                Label("\(profile.streak.count)", systemImage: "flame.fill")
+                                    .foregroundStyle(Theme.subtext)
+                            }
+                        }
+                        .font(Theme.font(13, weight: .bold))
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 7)
+                        .overlay(Capsule().stroke(Theme.border, lineWidth: 1))
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Find Score: \(profile.rank.name), \(profile.score) points. Open Awards")
+                }
+
                 Spacer(minLength: 60)
             }
             .padding(.horizontal, 20)
@@ -864,6 +887,7 @@ struct SearchView: View {
             }
             // The rating row waits for the full response (results first).
             .environment(\.findRefining, viewModel.isRefining)
+            .environment(\.findResultPoints, awardsService.lastAward?.points ?? 0)
             .overlay {
                 if viewModel.isLoading {
                     ZStack {

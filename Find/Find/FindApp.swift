@@ -18,6 +18,7 @@ struct FindApp: App {
     init() {
         let client = FindAPIClient(config: .fromBundle())
         apiClient = client
+        awardsService.apiClient = client
         _watchStore = StateObject(wrappedValue: FindWatchStore(apiClient: client))
     }
 

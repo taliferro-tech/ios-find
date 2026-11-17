@@ -143,6 +143,11 @@ final class SearchViewModel: ObservableObject {
         self.feedbackStore = FindFeedbackStore(apiClient: apiClient)
         self.awardsService = awardsService
         self.locationService = locationService
+        // A rating's points (Find Score) can unlock a rank or badge too.
+        feedbackStore.onScore = { [weak self] score in
+            guard let self, let unlocked = self.awardsService.applyAward(score), self.pendingAwardUnlock == nil else { return }
+            self.pendingAwardUnlock = unlocked
+        }
         loadHistory()
     }
 
@@ -218,8 +223,13 @@ final class SearchViewModel: ObservableObject {
             if FindActivityMonitor.shared.mode == .driving, let answer = FindSiriAnswer(response: resolvedResponse) {
                 FindSpeaker.shared.speak(answer.spoken)
             }
-            if let unlocked = awardsService.recordSearch() {
-                pendingAwardUnlock = unlocked
+            // Find Score: the backend's points when it scored the search,
+            // else the old on-device count.
+            if let score = resolvedResponse.score {
+                if let unlocked = awardsService.applyAward(score) { pendingAwardUnlock = unlocked }
+            } else {
+                awardsService.clearLastAward()
+                if let unlocked = awardsService.recordSearch() { pendingAwardUnlock = unlocked }
             }
             // The 5th search with something to show, over at least 2 days. Not
             // on top of an award, and not while driving.
@@ -275,7 +285,12 @@ final class SearchViewModel: ObservableObject {
         let id = UUID()
         searchID = id
         entityTask = Task { [weak self, apiClient, locationService] in
-            guard let found = try? await apiClient.detectEntity(query: query), !Task.isCancelled else { return }
+            guard let detected = try? await apiClient.detectEntity(query: query), !Task.isCancelled else { return }
+            // A kind of card this player hadn't seen before earns a badge.
+            if let self, let unlocked = self.awardsService.applyAward(detected.score), self.pendingAwardUnlock == nil {
+                self.pendingAwardUnlock = unlocked
+            }
+            guard let found = detected.entity else { return }
             let coordinate = found.isBusiness ? await locationService.currentCoordinate() : nil
             guard let self, !Task.isCancelled, self.searchID == id else { return }
             self.entityCoordinate = coordinate
