@@ -200,6 +200,24 @@ final class FindAPIClient: @unchecked Sendable {
         return try await post(path: "find/feedback", payload: request, responseType: FindFeedbackResponse.self).score
     }
 
+    // MARK: Crews
+
+    func crews() async throws -> [FindCrew] {
+        try await post(path: "find/crews", payload: FindCrewRequest(deviceId: FindDevice.id, timeZone: TimeZone.current.identifier), responseType: FindCrewsResponse.self).crews
+    }
+
+    func createCrew(name: String) async throws -> FindCrew {
+        try await post(path: "find/crews/create", payload: FindCrewRequest(deviceId: FindDevice.id, name: name), responseType: FindCrewResponse.self).crew
+    }
+
+    func joinCrew(code: String) async throws -> FindCrew {
+        try await post(path: "find/crews/join", payload: FindCrewRequest(deviceId: FindDevice.id, code: code), responseType: FindCrewResponse.self).crew
+    }
+
+    func leaveCrew(code: String) async throws {
+        _ = try await post(path: "find/crews/leave", payload: FindCrewRequest(deviceId: FindDevice.id, code: code), responseType: FindEmptyResponse.self)
+    }
+
     // MARK: Daily Find
 
     func dailyFind() async throws -> FindDailyState {

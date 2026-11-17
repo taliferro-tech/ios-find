@@ -458,6 +458,9 @@ struct FindScoreBadge: Codable, Hashable, Identifiable {
     var goal: String? = nil
     var state: String? = nil
     var earnedAt: Double? = nil
+    /// Share of active Finders holding it, once enough people play.
+    var rarity: Double? = nil
+    var rare: Bool? = nil
 }
 
 struct FindRankNext: Codable, Hashable {
@@ -504,6 +507,51 @@ struct FindScoreProfile: Codable, Hashable {
     var hasRecoveryCode: Bool
     let shareUrl: String
     var badges: [FindScoreBadge]
+    /// "Top 10% this week" (1, 5, 10 or 25), once enough people play.
+    var weekTop: Int? = nil
+}
+
+// MARK: - Crews (backend findCrews.service.js)
+
+struct FindCrewMember: Codable, Hashable, Identifiable {
+    var id: String { publicCode }
+    let place: Int
+    let nickname: String
+    let publicCode: String
+    let you: Bool
+    let weekScore: Int
+    let score: Int
+    let rank: String
+    let streak: Int
+    let dailyToday: Int?
+}
+
+struct FindCrew: Codable, Hashable, Identifiable {
+    var id: String { code }
+    let code: String
+    let name: String
+    let inviteUrl: String
+    let isOwner: Bool
+    let members: [FindCrewMember]
+}
+
+struct FindCrewRequest: Encodable {
+    let deviceId: String
+    var name: String? = nil
+    var code: String? = nil
+    var timeZone: String? = nil
+}
+
+struct FindCrewsResponse: Decodable {
+    let crews: [FindCrew]
+}
+
+struct FindCrewResponse: Decodable {
+    let crew: FindCrew
+}
+
+struct FindEmptyResponse: Decodable {
+    let success: Bool?
 }
 
 struct FindScoreRequest: Encodable {

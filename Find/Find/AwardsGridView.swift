@@ -43,7 +43,8 @@ struct AwardsGridView: View {
                 }
             }
 
-            if awardsService.profile != nil {
+            if awardsService.profile != nil, let apiClient = awardsService.apiClient {
+                CrewsSection(apiClient: apiClient)
                 recoverySection
             }
         }
@@ -131,11 +132,15 @@ struct AwardsGridView: View {
             .labelStyle(StreakLabelStyle())
         Text("\(profile.weekScore.formatted()) this week")
         Text("\(awardsService.unlockedCount) of \(awardsService.totalCount) badges")
+        if let top = profile.weekTop {
+            Text("Top \(top)% this week")
+        }
     }
 
     private func shareText(_ profile: FindScoreProfile) -> String {
         var text = "\(profile.nickname) · \(profile.rank.name) · \(profile.score.formatted()) on Find"
         if profile.streak.count > 1 { text += " · \(profile.streak.count)-day streak" }
+        if let top = profile.weekTop { text += " · Top \(top)% this week" }
         return text
     }
 
@@ -180,6 +185,22 @@ struct AwardsGridView: View {
                     .foregroundStyle(Theme.subtext)
                     .multilineTextAlignment(.center)
                     .padding(.top, -6)
+            }
+            if award.state == .unlocked, let rarity = award.rarity {
+                HStack(spacing: 4) {
+                    if award.rare {
+                        Text("Rare")
+                            .font(Theme.font(10, weight: .heavy))
+                            .foregroundStyle(.black)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 1)
+                            .background(Color.orange, in: Capsule())
+                    }
+                    Text("\(rarity.formatted())% of Finders")
+                        .font(Theme.font(11))
+                        .foregroundStyle(Theme.subtext)
+                }
+                .padding(.top, -6)
             }
         }
         .accessibilityElement(children: .combine)
@@ -338,6 +359,145 @@ private struct ScoreShareCard: View {
     }
 
     private var details: String {
-        [profile.streak.count > 1 ? "\(profile.streak.count)-day streak" : nil, topBadge].compactMap { $0 }.joined(separator: " · ")
+        [profile.streak.count > 1 ? "\(profile.streak.count)-day streak" : nil, profile.weekTop.map { "Top \($0)% this week" }, topBadge].compactMap { $0 }.joined(separator: " · ")
+    }
+}
+
+/// Crews (web: find-home/crews): small private friends boards ranked by this
+/// week's points. Make one and invite with its link, or join with a code.
+private struct CrewsSection: View {
+    let apiClient: FindAPIClient
+
+    @State private var crews: [FindCrew] = []
+    @State private var loaded = false
+    @State private var newName = ""
+    @State private var joinCode = ""
+    @State private var message = ""
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("FRIENDS")
+                .font(Theme.font(12, weight: .bold))
+                .tracking(1.4)
+                .foregroundStyle(Theme.subtext)
+            Text("Make a crew, invite people with its link, and see who scores more this week. Points start over every Monday.")
+                .font(Theme.font(14))
+                .foregroundStyle(Theme.subtext)
+                .fixedSize(horizontal: false, vertical: true)
+
+            ForEach(crews) { crew in
+                crewCard(crew)
+            }
+
+            if loaded && crews.count < 5 {
+                field("Name a new crew (Family, Book club\u{2026})", text: $newName, button: "Make crew", enabled: newName.trimmingCharacters(in: .whitespaces).count >= 2) {
+                    do {
+                        let made = try await apiClient.createCrew(name: newName.trimmingCharacters(in: .whitespaces))
+                        crews.append(made)
+                        newName = ""
+                        message = "Made \u{201C}\(made.name)\u{201D}. Invite people with its link."
+                    } catch { message = error.localizedDescription }
+                }
+                field("Have a code?", text: $joinCode, button: "Join", enabled: !joinCode.trimmingCharacters(in: .whitespaces).isEmpty) {
+                    do {
+                        let joined = try await apiClient.joinCrew(code: joinCode)
+                        crews.removeAll { $0.code == joined.code }
+                        crews.append(joined)
+                        joinCode = ""
+                        message = "You joined \u{201C}\(joined.name)\u{201D}."
+                    } catch { message = error.localizedDescription }
+                }
+            }
+            if !message.isEmpty {
+                Text(message)
+                    .font(Theme.font(14))
+                    .foregroundStyle(Theme.subtext)
+            }
+        }
+        .padding(.top, 14)
+        .task {
+            crews = (try? await apiClient.crews()) ?? []
+            loaded = true
+        }
+    }
+
+    private func crewCard(_ crew: FindCrew) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(crew.name).font(Theme.font(16, weight: .bold)).foregroundStyle(Theme.text)
+                Spacer()
+                Text("Code \(crew.code)").font(Theme.font(12, weight: .bold)).foregroundStyle(Theme.subtext)
+            }
+            ForEach(crew.members) { member in
+                HStack(spacing: 12) {
+                    Text("\(member.place)")
+                        .font(Theme.font(14))
+                        .foregroundStyle(Theme.subtext)
+                        .frame(width: 20)
+                        .monospacedDigit()
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(member.you ? "\(member.nickname) (you)" : member.nickname)
+                            .font(Theme.font(15, weight: member.you ? .bold : .regular))
+                            .foregroundStyle(Theme.text)
+                        Text(memberLine(member))
+                            .font(Theme.font(12))
+                            .foregroundStyle(Theme.subtext)
+                    }
+                    Spacer()
+                    Text(member.weekScore.formatted())
+                        .font(Theme.font(16, weight: .heavy))
+                        .foregroundStyle(Theme.text)
+                        .monospacedDigit()
+                }
+            }
+            HStack {
+                if let url = URL(string: crew.inviteUrl) {
+                    ShareLink(item: url, message: Text("Join my crew \u{201C}\(crew.name)\u{201D} on Find and let\u{2019}s see who scores more this week. Or enter code \(crew.code) in Awards.")) {
+                        Label("Invite", systemImage: "person.badge.plus")
+                            .font(Theme.font(14, weight: .bold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 8)
+                            .background(Theme.accent, in: Capsule())
+                    }
+                }
+                Spacer()
+                Button("Leave") {
+                    Task {
+                        do {
+                            try await apiClient.leaveCrew(code: crew.code)
+                            crews.removeAll { $0.code == crew.code }
+                            message = "You left \u{201C}\(crew.name)\u{201D}."
+                        } catch { message = error.localizedDescription }
+                    }
+                }
+                .font(Theme.font(13))
+                .foregroundStyle(Theme.subtext)
+            }
+        }
+        .padding(16)
+        .background(Theme.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+
+    private func memberLine(_ member: FindCrewMember) -> String {
+        var parts = [member.rank]
+        if member.streak > 1 { parts.append("\(member.streak)-day streak") }
+        if let daily = member.dailyToday { parts.append("Daily \(daily)") }
+        return parts.joined(separator: " · ")
+    }
+
+    private func field(_ placeholder: String, text: Binding<String>, button: String, enabled: Bool, action: @escaping () async -> Void) -> some View {
+        HStack(spacing: 8) {
+            TextField(placeholder, text: text)
+                .padding(10)
+                .background(Theme.surface, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            Button(button) { Task { await action() } }
+                .font(Theme.font(14, weight: .bold))
+                .foregroundStyle(.white)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 9)
+                .background(Theme.accent.opacity(enabled ? 1 : 0.5), in: Capsule())
+                .disabled(!enabled)
+        }
     }
 }

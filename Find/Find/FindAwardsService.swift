@@ -69,6 +69,8 @@ struct FindAwardListItem: Identifiable {
     var group: String = "searches"
     var goal: String? = nil
     var copy: String = ""
+    var rarity: Double? = nil
+    var rare: Bool = false
 }
 
 struct FindAwardGroup: Identifiable {
@@ -264,7 +266,7 @@ final class FindAwardsService: ObservableObject {
         case "mystery": .mystery
         default: .locked
         }
-        return FindAwardListItem(id: badge.id, title: badge.title, icon: FindAwardIcon(backend: badge.icon), state: state, group: badge.group, goal: badge.goal, copy: badge.copy)
+        return FindAwardListItem(id: badge.id, title: badge.title, icon: FindAwardIcon(backend: badge.icon), state: state, group: badge.group, goal: badge.goal, copy: badge.copy, rarity: badge.rarity, rare: badge.rare ?? false)
     }
 
     private func setProfile(_ profile: FindScoreProfile) {
