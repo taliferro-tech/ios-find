@@ -404,7 +404,7 @@ private extension FindSearchResponse {
             return self
         }
 
-        return FindSearchResponse(
+        var converted = FindSearchResponse(
             success: success,
             query: query,
             normalizedQuery: query,
@@ -419,6 +419,9 @@ private extension FindSearchResponse {
             timings: timings,
             rssBacked: nil
         )
+        // What the search earned (Find Score) still counts.
+        converted.score = score
+        return converted
     }
 }
 
