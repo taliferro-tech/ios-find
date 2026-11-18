@@ -612,6 +612,92 @@ struct FindMusicAppleSection: Decodable {
     let links: Links?
 }
 
+// MARK: How-to answers (design_handoff_find_howto_video)
+
+// Two sections, requested separately so the answer never waits on the video:
+// "answer" (summary, steps, facts, ingredients or tools) and "video" (one
+// YouTube video, or none when nothing was good enough).
+
+struct FindHowToAnswer: Decodable {
+    struct Source: Decodable, Hashable {
+        let name: String
+        let url: String?
+    }
+
+    struct Summary: Decodable {
+        let text: String
+        let sources: [Source]?
+    }
+
+    struct Step: Decodable, Hashable {
+        let title: String
+        let detail: String?
+    }
+
+    let title: String?
+    /// "recipe", "diy", "tech" or "other".
+    let category: String?
+    let facts: [FindKeyFact]?
+    let meta: String?
+    let summary: Summary?
+    let steps: [Step]?
+    let ingredients: [String]?
+    let tools: [String]?
+    let moreUrl: String?
+}
+
+struct FindHowToVideoSection: Decodable {
+    struct Video: Decodable {
+        let provider: String?
+        let id: String
+        let title: String
+        let channel: String?
+        let views: Double?
+        let durationSec: Double?
+        let duration: String?
+        let thumbUrl: String?
+        let chapters: [Chapter]?
+    }
+
+    struct Chapter: Decodable, Hashable {
+        let title: String
+        let sec: Double
+    }
+
+    let video: Video?
+    /// One per step: the second in the video where that step starts, or nil.
+    let stepChapters: [Double?]?
+    let moreUrl: String?
+}
+
+// MARK: Team videos (design_handoff_find_team_videos, v2)
+
+/// A sports team's "videos" section: 1 to 3 of its newest YouTube videos.
+struct FindTeamVideos: Decodable {
+    struct Colors: Decodable {
+        let primary: String
+        let accent: String
+    }
+
+    struct Video: Decodable, Hashable {
+        let id: String
+        let title: String
+        /// "Highlights", "Press conference", "Top plays", "Recap", "Analysis".
+        let type: String?
+        let channel: String?
+        let publishedAt: String?
+        let durationSec: Double?
+        let duration: String?
+        let embeddable: Bool?
+    }
+
+    let team: String
+    let league: String?
+    let colors: Colors?
+    let moreUrl: String?
+    let videos: [Video]
+}
+
 // MARK: Formatting
 
 enum FindEntityFormat {
