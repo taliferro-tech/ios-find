@@ -371,6 +371,8 @@ struct FindDailyResult: Codable, Hashable {
     let explanation: String
     let sourceUrl: String
     let sourceTitle: String
+    /// A link whose preview shows this result (find.16ahead.com/d/<date>/<code>).
+    var shareUrl: String? = nil
 }
 
 struct FindDailyState: Codable, Hashable {

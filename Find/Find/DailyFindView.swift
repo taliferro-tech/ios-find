@@ -123,6 +123,7 @@ struct DailyFindView: View {
                         .font(Theme.font(15, weight: .bold))
                         .foregroundStyle(Theme.text)
                 }
+                muted("You\u{2019}ve played today\u{2019}s Daily Find.")
                 if let choices = state.choices {
                     LazyVGrid(columns: [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10)], spacing: 10) {
                         ForEach(Array(choices.enumerated()), id: \.offset) { index, choice in
@@ -137,7 +138,8 @@ struct DailyFindView: View {
                     Link(result.sourceTitle.isEmpty ? "Source" : result.sourceTitle, destination: url)
                         .font(Theme.font(14, weight: .semibold))
                 }
-                ShareLink(item: URL(string: "https://find.16ahead.com/?daily=1")!, message: Text(shareText(result))) {
+                // The /d/ link's preview shows the score and the question (Messages may keep only the link).
+                ShareLink(item: URL(string: result.shareUrl ?? "") ?? URL(string: "https://find.16ahead.com/?daily=1")!, message: Text(shareText(result))) {
                     Label("Share my result", systemImage: "square.and.arrow.up")
                         .font(Theme.font(15, weight: .bold))
                         .foregroundStyle(.white)
@@ -166,9 +168,10 @@ struct DailyFindView: View {
             .multilineTextAlignment(.center)
             .frame(maxWidth: .infinity, minHeight: 52)
             .padding(.horizontal, 10)
-            .background(style == .right ? Color.green.opacity(0.16) : Color.clear, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(border, lineWidth: style == .open || style == .faded ? 1 : 2))
-            .opacity(style == .faded ? 0.6 : 1)
+            .background(style == .right ? Color.green.opacity(0.16) : (style == .faded ? Theme.surface : Color.clear), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            // Answered: the other choices lose their border and fade, so they don't look tappable.
+            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(style == .faded ? Color.clear : border, lineWidth: style == .open ? 1 : 2))
+            .opacity(style == .faded ? 0.35 : 1)
     }
 
     private func muted(_ text: String) -> some View {
@@ -204,5 +207,60 @@ struct DailyFindView: View {
         guard result.correct else { return "Today\u{2019}s Daily Find got me. Can you get it?" }
         if let beat = result.beat { return "I scored \(result.points) on today\u{2019}s Daily Find and beat \(beat)% of Finders. Can you beat it?" }
         return "I scored \(result.points) on today\u{2019}s Daily Find. Can you beat it?"
+    }
+}
+
+/// The home screen's Daily Find button. Watches the store itself, so it
+/// switches to "Played today" as soon as the answer is in.
+struct DailyHomeEntry: View {
+    @ObservedObject var store: FindDailyStore
+    let open: () -> Void
+
+    var body: some View {
+        let played = store.state?.status == "answered" ? store.state?.result : nil
+        Button(action: open) {
+            HStack(spacing: 12) {
+                Image(systemName: played == nil ? "calendar" : "checkmark.circle.fill")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(played == nil ? Theme.accent : Color.green)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Daily Find").font(Theme.font(15, weight: .bold)).foregroundStyle(Theme.text)
+                    Text(played.map { "Played today \u{00B7} \($0.points) points. New question tomorrow." } ?? "Today\u{2019}s question for everyone")
+                        .font(Theme.font(13)).foregroundStyle(Theme.subtext)
+                }
+                Spacer()
+                Image(systemName: "chevron.right").foregroundStyle(Theme.subtext)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            .background(Theme.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .task { if store.state == nil { await store.load() } }
+    }
+}
+
+/// "Daily Find: found it? Answer" above results, while today's question is being played.
+struct DailyPlayingBanner: View {
+    @ObservedObject var store: FindDailyStore
+    let open: () -> Void
+
+    var body: some View {
+        if store.playingDate != nil {
+            Button(action: open) {
+                HStack(spacing: 8) {
+                    Image(systemName: "calendar")
+                    Text("Daily Find: found it? ") + Text("Answer").bold().foregroundColor(Theme.accent)
+                }
+                .font(Theme.font(14))
+                .foregroundStyle(Theme.text)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 10)
+                .background(Theme.accent.opacity(0.14), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            }
+            .buttonStyle(.plain)
+            .padding(.horizontal, 16)
+            .padding(.bottom, 6)
+        }
     }
 }
