@@ -1,8 +1,21 @@
 import Foundation
 
+/// This phone's anonymous Find ID: Watches and Find Score both use it.
+enum FindDevice {
+    static var id: String {
+        let defaults = UserDefaults.standard
+        if let saved = defaults.string(forKey: "find.deviceId") { return saved }
+        let created = UUID().uuidString
+        defaults.set(created, forKey: "find.deviceId")
+        return created
+    }
+}
+
 enum FindAPIError: LocalizedError {
     case invalidResponse
     case httpError(Int)
+    /// The backend's own reason ("Please pick a different nickname.").
+    case server(String)
 
     var errorDescription: String? {
         switch self {
@@ -10,6 +23,8 @@ enum FindAPIError: LocalizedError {
             return "The server response could not be understood."
         case .httpError(let code):
             return "The server returned HTTP \(code)."
+        case .server(let message):
+            return message
         }
     }
 }
@@ -56,6 +71,7 @@ final class FindAPIClient: @unchecked Sendable {
         maxResults: Int = 10,
         latitude: Double? = nil,
         longitude: Double? = nil,
+        dailyDate: String? = nil,
         onEvent: @escaping @MainActor (FindSearchEvent) -> Void
     ) async throws -> FindSearchResponse {
         let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -68,7 +84,9 @@ final class FindAPIClient: @unchecked Sendable {
             longitude: longitude,
             timeZone: TimeZone.current.identifier,
             features: ["instant", "units"],
-            stream: true
+            stream: true,
+            deviceId: FindDevice.id,
+            dailyDate: dailyDate
         )
         var request = URLRequest(url: config.apiBaseURL.appending(path: "find/search"))
         request.httpMethod = "POST"
@@ -156,10 +174,11 @@ final class FindAPIClient: @unchecked Sendable {
     }
 
     /// Is this query one thing (a team, a store, a country, a movie...)?
-    /// Answers before the search finishes; nil means no card.
-    func detectEntity(query: String) async throws -> FindEntity? {
+    /// Answers before the search finishes; nil means no card. `score` is
+    /// what a new kind of card earned.
+    func detectEntity(query: String) async throws -> FindEntityDetectResponse {
         let payload = FindEntityDetectRequest(query: query.trimmingCharacters(in: .whitespacesAndNewlines), cardTypes: EntityCardView.cardTypes)
-        return try await post(path: "find/entity", payload: payload, responseType: FindEntityDetectResponse.self).entity
+        return try await post(path: "find/entity", payload: payload, responseType: FindEntityDetectResponse.self)
     }
 
     /// One section of a single-item card, as the raw JSON of its `data`
@@ -173,8 +192,67 @@ final class FindAPIClient: @unchecked Sendable {
         return try JSONSerialization.data(withJSONObject: section)
     }
 
-    func submitFeedback(_ payload: FindFeedbackRequest) async throws {
-        _ = try await post(path: "find/feedback", payload: payload, responseType: FindFeedbackResponse.self)
+    @discardableResult
+    func submitFeedback(_ payload: FindFeedbackRequest) async throws -> FindScoreAward? {
+        var request = payload
+        request.deviceId = FindDevice.id
+        request.timeZone = TimeZone.current.identifier
+        return try await post(path: "find/feedback", payload: request, responseType: FindFeedbackResponse.self).score
+    }
+
+    // MARK: Crews
+
+    func crews() async throws -> [FindCrew] {
+        try await post(path: "find/crews", payload: FindCrewRequest(deviceId: FindDevice.id, timeZone: TimeZone.current.identifier), responseType: FindCrewsResponse.self).crews
+    }
+
+    func createCrew(name: String) async throws -> FindCrew {
+        try await post(path: "find/crews/create", payload: FindCrewRequest(deviceId: FindDevice.id, name: name), responseType: FindCrewResponse.self).crew
+    }
+
+    func joinCrew(code: String) async throws -> FindCrew {
+        try await post(path: "find/crews/join", payload: FindCrewRequest(deviceId: FindDevice.id, code: code), responseType: FindCrewResponse.self).crew
+    }
+
+    func leaveCrew(code: String) async throws {
+        _ = try await post(path: "find/crews/leave", payload: FindCrewRequest(deviceId: FindDevice.id, code: code), responseType: FindEmptyResponse.self)
+    }
+
+    // MARK: Daily Find
+
+    func dailyFind() async throws -> FindDailyState {
+        try await post(path: "find/daily", payload: FindDailyRequest(deviceId: FindDevice.id, timeZone: TimeZone.current.identifier), responseType: FindDailyResponse.self).daily
+    }
+
+    func startDailyFind(date: String) async throws -> FindDailyState {
+        try await post(path: "find/daily/start", payload: FindDailyRequest(deviceId: FindDevice.id, timeZone: TimeZone.current.identifier, date: date), responseType: FindDailyResponse.self).daily
+    }
+
+    func answerDailyFind(date: String, choice: Int) async throws -> FindDailyState {
+        try await post(path: "find/daily/answer", payload: FindDailyRequest(deviceId: FindDevice.id, timeZone: TimeZone.current.identifier, date: date, choice: choice), responseType: FindDailyResponse.self).daily
+    }
+
+    // MARK: Find Score (all POSTs, so the device ID never lands in a URL)
+
+    func scoreProfile() async throws -> FindScoreProfile {
+        try await post(path: "find/score/profile", payload: FindScoreRequest(deviceId: FindDevice.id), responseType: FindScoreProfileResponse.self).profile
+    }
+
+    func setNickname(_ nickname: String) async throws -> FindScoreProfile {
+        try await post(path: "find/score/nickname", payload: FindScoreRequest(deviceId: FindDevice.id, nickname: nickname), responseType: FindScoreProfileResponse.self).profile
+    }
+
+    /// Hands the old on-device search count to the backend, once.
+    func importAwards(count: Int, badges: [FindScoreImportBadge]) async throws -> FindScoreProfile {
+        try await post(path: "find/score/import", payload: FindScoreRequest(deviceId: FindDevice.id, count: count, badges: badges, timeZone: TimeZone.current.identifier), responseType: FindScoreProfileResponse.self).profile
+    }
+
+    func recoveryCode() async throws -> String {
+        try await post(path: "find/score/recovery", payload: FindScoreRequest(deviceId: FindDevice.id), responseType: FindScoreRecoveryResponse.self).code
+    }
+
+    func recoverScore(code: String) async throws -> FindScoreProfile {
+        try await post(path: "find/score/recover", payload: FindScoreRequest(deviceId: FindDevice.id, code: code), responseType: FindScoreProfileResponse.self).profile
     }
 
     private func post<Request: Encodable, Response: Decodable>(
@@ -200,6 +278,10 @@ final class FindAPIClient: @unchecked Sendable {
         }
 
         guard (200...299).contains(httpResponse.statusCode) else {
+            if let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+               let message = object["message"] as? String, !message.isEmpty {
+                throw FindAPIError.server(message)
+            }
             throw FindAPIError.httpError(httpResponse.statusCode)
         }
 

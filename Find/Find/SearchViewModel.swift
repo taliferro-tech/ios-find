@@ -1,6 +1,8 @@
 import Foundation
 import Combine
 import CoreLocation
+import UIKit
+import UserNotifications
 
 @MainActor
 final class SearchViewModel: ObservableObject {
@@ -11,6 +13,11 @@ final class SearchViewModel: ObservableObject {
     @Published private(set) var searchStage = "planning"
     @Published private(set) var checkingPageCount = 0
     @Published private(set) var searchStartedAt = Date()
+    /// "Let me know when it's ready": offered once a search has run 8 seconds.
+    @Published private(set) var notifyOffer = false
+    @Published private(set) var notifyWhenReady = false
+    private var notifyOfferTask: Task<Void, Never>?
+    private var backgroundTask: UIBackgroundTaskIdentifier = .invalid
     @Published var errorMessage = ""
     @Published var searchResponse: FindSearchResponse?
     @Published var selectedResult: FindRankedResult?
@@ -37,6 +44,8 @@ final class SearchViewModel: ObservableObject {
     private var searchID = UUID()
 
     let feedbackStore: FindFeedbackStore
+    /// Daily Find: today's question (searches while playing count toward it).
+    let dailyStore: FindDailyStore
     private let apiClient: FindAPIClient
     private let awardsService: FindAwardsService
     private let locationService: FindLocationService
@@ -141,13 +150,80 @@ final class SearchViewModel: ObservableObject {
     init(apiClient: FindAPIClient, awardsService: FindAwardsService, locationService: FindLocationService) {
         self.apiClient = apiClient
         self.feedbackStore = FindFeedbackStore(apiClient: apiClient)
+        self.dailyStore = FindDailyStore(apiClient: apiClient)
         self.awardsService = awardsService
         self.locationService = locationService
+        // A rating's points (Find Score) can unlock a rank or badge too.
+        feedbackStore.onScore = { [weak self] score in
+            guard let self, let unlocked = self.awardsService.applyAward(score), self.pendingAwardUnlock == nil else { return }
+            self.pendingAwardUnlock = unlocked
+        }
         loadHistory()
     }
 
     func dismissAwardUnlock() {
         pendingAwardUnlock = nil
+    }
+
+    // MARK: "Let me know when it's ready"
+
+    private func startNotifyOffer() {
+        notifyOfferTask?.cancel()
+        notifyOffer = false
+        notifyWhenReady = false
+        notifyOfferTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 8_000_000_000)
+            guard let self, !Task.isCancelled, self.isLoading || self.isRefining else { return }
+            self.notifyOffer = true
+        }
+    }
+
+    /// The person can leave Find; a notification says when the search is done.
+    /// iOS gives the app about 30 seconds in the background, plenty for a
+    /// slow search.
+    func requestReadyNotice() {
+        notifyWhenReady = true
+        if backgroundTask == .invalid {
+            backgroundTask = UIApplication.shared.beginBackgroundTask(withName: "FindSearch") { [weak self] in
+                self?.endBackgroundTask()
+            }
+        }
+        Task {
+            let center = UNUserNotificationCenter.current()
+            if await center.notificationSettings().authorizationStatus == .notDetermined {
+                _ = try? await center.requestAuthorization(options: [.alert, .sound])
+            }
+        }
+    }
+
+    private func finishReadyNotice(query: String, succeeded: Bool) {
+        notifyOfferTask?.cancel()
+        notifyOffer = false
+        defer { endBackgroundTask() }
+        guard notifyWhenReady else { return }
+        notifyWhenReady = false
+        guard UIApplication.shared.applicationState != .active else { return }
+        let content = UNMutableNotificationContent()
+        content.title = succeeded ? "Your Find is ready" : "Find couldn\u{2019}t finish that search"
+        content.body = query
+        content.sound = .default
+        // Not "query": a tap just opens Find, where the result already is
+        // (a Watch notification's "query" would run the search again).
+        content.userInfo = ["readyQuery": query]
+        UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: "find-ready", content: content, trigger: nil))
+    }
+
+    private func endBackgroundTask() {
+        guard backgroundTask != .invalid else { return }
+        UIApplication.shared.endBackgroundTask(backgroundTask)
+        backgroundTask = .invalid
+    }
+
+    /// Daily Find answered: its points and badges go through the unlock overlay.
+    func applyDailyScore(_ score: FindScoreAward?) {
+        if let unlocked = awardsService.applyAward(score), pendingAwardUnlock == nil {
+            pendingAwardUnlock = unlocked
+        }
     }
 
     func runSearch() async {
@@ -159,6 +235,7 @@ final class SearchViewModel: ObservableObject {
         searchStage = "planning"
         checkingPageCount = 0
         searchStartedAt = Date()
+        startNotifyOffer()
         errorMessage = ""
         summaryText = ""
         detectEntity(trimmed)
@@ -179,7 +256,8 @@ final class SearchViewModel: ObservableObject {
             var response = try await apiClient.searchStream(
                 query: trimmed,
                 latitude: coordinate?.latitude,
-                longitude: coordinate?.longitude
+                longitude: coordinate?.longitude,
+                dailyDate: dailyStore.playingDate
             ) { [weak self] event in
                 guard let self, self.searchID == thisSearch else { return }
                 switch event {
@@ -218,8 +296,15 @@ final class SearchViewModel: ObservableObject {
             if FindActivityMonitor.shared.mode == .driving, let answer = FindSiriAnswer(response: resolvedResponse) {
                 FindSpeaker.shared.speak(answer.spoken)
             }
-            if let unlocked = awardsService.recordSearch() {
-                pendingAwardUnlock = unlocked
+            dailyStore.noteSearch(resolvedResponse.daily)
+            finishReadyNotice(query: trimmed, succeeded: true)
+            // Find Score: the backend's points when it scored the search,
+            // else the old on-device count.
+            if let score = resolvedResponse.score {
+                if let unlocked = awardsService.applyAward(score) { pendingAwardUnlock = unlocked }
+            } else {
+                awardsService.clearLastAward()
+                if let unlocked = awardsService.recordSearch() { pendingAwardUnlock = unlocked }
             }
             // The 5th search with something to show, over at least 2 days. Not
             // on top of an award, and not while driving.
@@ -232,6 +317,7 @@ final class SearchViewModel: ObservableObject {
             }
         } catch {
             guard searchID == thisSearch else { return }
+            finishReadyNotice(query: trimmed, succeeded: false)
             if isRefining {
                 // The cards stay; only the details didn't arrive.
                 isRefining = false
@@ -275,7 +361,12 @@ final class SearchViewModel: ObservableObject {
         let id = UUID()
         searchID = id
         entityTask = Task { [weak self, apiClient, locationService] in
-            guard let found = try? await apiClient.detectEntity(query: query), !Task.isCancelled else { return }
+            guard let detected = try? await apiClient.detectEntity(query: query), !Task.isCancelled else { return }
+            // A kind of card this player hadn't seen before earns a badge.
+            if let self, let unlocked = self.awardsService.applyAward(detected.score), self.pendingAwardUnlock == nil {
+                self.pendingAwardUnlock = unlocked
+            }
+            guard let found = detected.entity else { return }
             let coordinate = found.isBusiness ? await locationService.currentCoordinate() : nil
             guard let self, !Task.isCancelled, self.searchID == id else { return }
             self.entityCoordinate = coordinate
@@ -389,7 +480,7 @@ private extension FindSearchResponse {
             return self
         }
 
-        return FindSearchResponse(
+        var converted = FindSearchResponse(
             success: success,
             query: query,
             normalizedQuery: query,
@@ -404,6 +495,10 @@ private extension FindSearchResponse {
             timings: timings,
             rssBacked: nil
         )
+        // What the search earned (Find Score) still counts.
+        converted.score = score
+        converted.daily = daily
+        return converted
     }
 }
 

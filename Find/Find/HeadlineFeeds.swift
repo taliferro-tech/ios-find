@@ -123,6 +123,9 @@ actor HeadlineFeeds {
             rssBacked: response.rssBacked
         )
         merged.instant = response.instant
+        // What the search earned (Find Score) rides along with the merged headlines.
+        merged.score = response.score
+        merged.daily = response.daily
         return merged
     }
 

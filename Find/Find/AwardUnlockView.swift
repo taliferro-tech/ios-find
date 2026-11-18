@@ -37,7 +37,7 @@ struct AwardUnlockView: View {
             VStack(spacing: 0) {
                 Spacer(minLength: 90)
 
-                Text("AWARD UNLOCKED")
+                Text(award.eyebrow ?? "AWARD UNLOCKED")
                     .font(Theme.font(12, weight: .heavy))
                     .tracking(2)
                     .foregroundStyle(Theme.subtext)
@@ -74,7 +74,7 @@ struct AwardUnlockView: View {
                     .opacity(descVisible ? 1 : 0)
                     .offset(y: descVisible ? 0 : 8)
 
-                Text("\(unlockedCount) of \(totalCount) unlocked")
+                Text("\(unlockedCount) of \(totalCount) badges")
                     .font(Theme.font(12, weight: .bold))
                     .foregroundStyle(Theme.subtext)
                     .padding(.top, 20)

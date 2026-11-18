@@ -9,6 +9,8 @@ struct SearchView: View {
     @State private var selectedTab: BottomTab = .home
     @State private var showingShareSheet = false
     @State private var showingSearchScreen = true
+    /// Daily Find sheet (home entry, and the banner while playing).
+    @State private var showingDaily = false
     @State private var enteringNewSearch = false
     @State private var resultSearchQuery = ""
     @State private var highlightedPill = ""
@@ -157,6 +159,16 @@ struct SearchView: View {
                 if let url = preparedShareURL ?? currentShareURL {
                     ShareSheet(items: [url])
                 }
+            }
+            .sheet(isPresented: $showingDaily) {
+                DailyFindView(
+                    store: viewModel.dailyStore,
+                    onSearch: { query in
+                        selectedTab = .home
+                        runSearchFromHome(query)
+                    },
+                    onScore: { score in viewModel.applyDailyScore(score) }
+                )
             }
         }
         .ignoresSafeArea(.keyboard, edges: .bottom)
@@ -316,6 +328,50 @@ struct SearchView: View {
 
                 quickActionsGrid
 
+                // Daily Find: today's question for everyone.
+                Button {
+                    showingDaily = true
+                } label: {
+                    HStack(spacing: 12) {
+                        Image(systemName: "calendar")
+                            .font(.system(size: 18, weight: .semibold))
+                            .foregroundStyle(Theme.accent)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Daily Find").font(Theme.font(15, weight: .bold)).foregroundStyle(Theme.text)
+                            Text("Today\u{2019}s question for everyone").font(Theme.font(13)).foregroundStyle(Theme.subtext)
+                        }
+                        Spacer()
+                        Image(systemName: "chevron.right").foregroundStyle(Theme.subtext)
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 12)
+                    .background(Theme.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                }
+                .buttonStyle(.plain)
+
+                // Find Score: rank and streak, opening Awards.
+                if let profile = awardsService.profile {
+                    Button {
+                        selectedTab = .awards
+                    } label: {
+                        HStack(spacing: 8) {
+                            Image(systemName: "rosette").foregroundStyle(Theme.accent)
+                            Text("\(profile.rank.name) · \(profile.score.formatted())")
+                                .foregroundStyle(Theme.text)
+                            if profile.streak.count > 1 {
+                                Label("\(profile.streak.count)", systemImage: "flame.fill")
+                                    .foregroundStyle(Theme.subtext)
+                            }
+                        }
+                        .font(Theme.font(13, weight: .bold))
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 7)
+                        .overlay(Capsule().stroke(Theme.border, lineWidth: 1))
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Find Score: \(profile.rank.name), \(profile.score) points. Open Awards")
+                }
+
                 Spacer(minLength: 60)
             }
             .padding(.horizontal, 20)
@@ -387,9 +443,12 @@ struct SearchView: View {
                     answerHomeView(screenWidth: screenWidth)
                 }
             } else if viewModel.isLoading {
-                TimelineView(.periodic(from: .now, by: 0.1)) { context in
-                    ProgressView("\(viewModel.searchStageText) \(Self.elapsed(since: viewModel.searchStartedAt, at: context.date))s")
-                        .tint(Theme.accent)
+                VStack(spacing: 16) {
+                    TimelineView(.periodic(from: .now, by: 0.1)) { context in
+                        ProgressView("\(viewModel.searchStageText) \(Self.elapsed(since: viewModel.searchStartedAt, at: context.date))s")
+                            .tint(Theme.accent)
+                    }
+                    readyNotice
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
@@ -840,6 +899,26 @@ struct SearchView: View {
                 refiningStatus
             }
 
+            // Daily Find: back to today's question while playing it.
+            if viewModel.dailyStore.playingDate != nil {
+                Button {
+                    showingDaily = true
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "calendar")
+                        Text("Daily Find: found it? ") + Text("Answer").bold().foregroundColor(Theme.accent)
+                    }
+                    .font(Theme.font(14))
+                    .foregroundStyle(Theme.text)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 10)
+                    .background(Theme.accent.opacity(0.14), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                }
+                .buttonStyle(.plain)
+                .padding(.horizontal, 16)
+                .padding(.bottom, 6)
+            }
+
             if viewModel.searchResponse?.queryType == .local {
                 OpenNowButton(isOn: viewModel.isOpenNowSearch) {
                     Task { await viewModel.toggleOpenNow() }
@@ -864,6 +943,7 @@ struct SearchView: View {
             }
             // The rating row waits for the full response (results first).
             .environment(\.findRefining, viewModel.isRefining)
+            .environment(\.findResultPoints, awardsService.lastAward?.points ?? 0)
             .overlay {
                 if viewModel.isLoading {
                     ZStack {
@@ -894,7 +974,32 @@ struct SearchView: View {
     // coordinator's `didFinishAnimating`; a shelf-chevron tap already calls
     // `viewModel.select(...)` directly, and `FindResultPagerView` notices
     // the mismatch next render and animates the same slide to it.
+    /// "Let me know when it's ready" on a slow search.
+    @ViewBuilder
+    private var readyNotice: some View {
+        if viewModel.notifyOffer {
+            if viewModel.notifyWhenReady {
+                Text("We\u{2019}ll let you know. Feel free to leave Find.")
+                    .font(Theme.font(13))
+                    .foregroundStyle(Theme.muted)
+            } else {
+                Button {
+                    viewModel.requestReadyNotice()
+                } label: {
+                    Label("Let me know when it\u{2019}s ready", systemImage: "bell")
+                        .font(Theme.font(13, weight: .bold))
+                        .foregroundStyle(Theme.accent)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 7)
+                        .overlay(Capsule().stroke(Theme.border, lineWidth: 1))
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
     /// Results first: the cards are up and Find is still checking their pages.
+    @ViewBuilder
     private var refiningStatus: some View {
         TimelineView(.periodic(from: .now, by: 0.1)) { context in
             HStack(spacing: 8) {
@@ -908,6 +1013,8 @@ struct SearchView: View {
             .padding(.bottom, 6)
             .accessibilityElement(children: .combine)
         }
+        readyNotice
+            .padding(.bottom, 6)
     }
 
     private static func elapsed(since start: Date, at now: Date) -> String {

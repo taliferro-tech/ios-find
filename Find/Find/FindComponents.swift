@@ -13,6 +13,10 @@ import UIKit
 @MainActor
 final class FindFeedbackStore: ObservableObject {
     @Published private(set) var sentQueries: Set<String> = []
+    /// Points the latest rating earned, by query (Find Score).
+    @Published private(set) var pointsByQuery: [String: Int] = [:]
+    /// Gets what a rating earned (Find Score), on the main actor.
+    var onScore: ((FindScoreAward) -> Void)?
     private let apiClient: FindAPIClient
 
     init(apiClient: FindAPIClient) {
@@ -23,12 +27,20 @@ final class FindFeedbackStore: ObservableObject {
         sentQueries.contains(Self.key(query))
     }
 
+    func points(for query: String) -> Int {
+        pointsByQuery[Self.key(query)] ?? 0
+    }
+
     func send(_ rating: FindFeedbackRating, query: String, queryType: FindQueryType) {
         let key = Self.key(query)
         guard !key.isEmpty, !sentQueries.contains(key) else { return }
         sentQueries.insert(key)
         let request = FindFeedbackRequest(rating: rating, comment: nil, query: query, queryType: queryType.rawString)
-        Task { try? await apiClient.submitFeedback(request) }
+        Task { [weak self, apiClient] in
+            guard let score = try? await apiClient.submitFeedback(request) else { return }
+            self?.pointsByQuery[key] = score.points
+            self?.onScore?(score)
+        }
     }
 
     private static func key(_ query: String) -> String {
@@ -42,10 +54,20 @@ private struct FindRefiningKey: EnvironmentKey {
     static let defaultValue = false
 }
 
+/// Find Score: what the shown result's search earned ("+12 points").
+private struct FindResultPointsKey: EnvironmentKey {
+    static let defaultValue = 0
+}
+
 extension EnvironmentValues {
     var findRefining: Bool {
         get { self[FindRefiningKey.self] }
         set { self[FindRefiningKey.self] = newValue }
+    }
+
+    var findResultPoints: Int {
+        get { self[FindResultPointsKey.self] }
+        set { self[FindResultPointsKey.self] = newValue }
     }
 }
 
@@ -55,6 +77,7 @@ struct FindFeedbackRow: View {
     let queryType: FindQueryType
     var meta: String?
     @Environment(\.findRefining) private var refining
+    @Environment(\.findResultPoints) private var resultPoints
 
     var body: some View {
         if !refining { row }
@@ -63,7 +86,8 @@ struct FindFeedbackRow: View {
     private var row: some View {
         VStack(alignment: .leading, spacing: 10) {
             if store.isSent(query) {
-                Text("Thanks for the feedback.")
+                let earned = store.points(for: query)
+                Text(earned > 0 ? "Thanks for the feedback. +\(earned) points" : "Thanks for the feedback.")
                     .font(Theme.font(13))
                     .foregroundStyle(Theme.muted)
             } else {
@@ -82,10 +106,24 @@ struct FindFeedbackRow: View {
                     }
                 }
             }
-            if let meta, !meta.isEmpty {
-                Text(meta)
-                    .font(Theme.font(13))
-                    .foregroundStyle(Theme.muted)
+            if resultPoints > 0 || !(meta ?? "").isEmpty {
+                HStack(spacing: 8) {
+                    // What this search earned (Find Score).
+                    if resultPoints > 0 {
+                        Text("+\(resultPoints) points")
+                            .font(Theme.font(13, weight: .bold))
+                            .foregroundStyle(Theme.accent)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 4)
+                            .background(Theme.accent.opacity(0.14), in: Capsule())
+                            .fixedSize()
+                    }
+                    if let meta, !meta.isEmpty {
+                        Text(meta)
+                            .font(Theme.font(13))
+                            .foregroundStyle(Theme.muted)
+                    }
+                }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
