@@ -1,6 +1,8 @@
 import Foundation
 import Combine
 import CoreLocation
+import UIKit
+import UserNotifications
 
 @MainActor
 final class SearchViewModel: ObservableObject {
@@ -11,6 +13,11 @@ final class SearchViewModel: ObservableObject {
     @Published private(set) var searchStage = "planning"
     @Published private(set) var checkingPageCount = 0
     @Published private(set) var searchStartedAt = Date()
+    /// "Let me know when it's ready": offered once a search has run 8 seconds.
+    @Published private(set) var notifyOffer = false
+    @Published private(set) var notifyWhenReady = false
+    private var notifyOfferTask: Task<Void, Never>?
+    private var backgroundTask: UIBackgroundTaskIdentifier = .invalid
     @Published var errorMessage = ""
     @Published var searchResponse: FindSearchResponse?
     @Published var selectedResult: FindRankedResult?
@@ -158,6 +165,60 @@ final class SearchViewModel: ObservableObject {
         pendingAwardUnlock = nil
     }
 
+    // MARK: "Let me know when it's ready"
+
+    private func startNotifyOffer() {
+        notifyOfferTask?.cancel()
+        notifyOffer = false
+        notifyWhenReady = false
+        notifyOfferTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 8_000_000_000)
+            guard let self, !Task.isCancelled, self.isLoading || self.isRefining else { return }
+            self.notifyOffer = true
+        }
+    }
+
+    /// The person can leave Find; a notification says when the search is done.
+    /// iOS gives the app about 30 seconds in the background, plenty for a
+    /// slow search.
+    func requestReadyNotice() {
+        notifyWhenReady = true
+        if backgroundTask == .invalid {
+            backgroundTask = UIApplication.shared.beginBackgroundTask(withName: "FindSearch") { [weak self] in
+                self?.endBackgroundTask()
+            }
+        }
+        Task {
+            let center = UNUserNotificationCenter.current()
+            if await center.notificationSettings().authorizationStatus == .notDetermined {
+                _ = try? await center.requestAuthorization(options: [.alert, .sound])
+            }
+        }
+    }
+
+    private func finishReadyNotice(query: String, succeeded: Bool) {
+        notifyOfferTask?.cancel()
+        notifyOffer = false
+        defer { endBackgroundTask() }
+        guard notifyWhenReady else { return }
+        notifyWhenReady = false
+        guard UIApplication.shared.applicationState != .active else { return }
+        let content = UNMutableNotificationContent()
+        content.title = succeeded ? "Your Find is ready" : "Find couldn\u{2019}t finish that search"
+        content.body = query
+        content.sound = .default
+        // Not "query": a tap just opens Find, where the result already is
+        // (a Watch notification's "query" would run the search again).
+        content.userInfo = ["readyQuery": query]
+        UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: "find-ready", content: content, trigger: nil))
+    }
+
+    private func endBackgroundTask() {
+        guard backgroundTask != .invalid else { return }
+        UIApplication.shared.endBackgroundTask(backgroundTask)
+        backgroundTask = .invalid
+    }
+
     /// Daily Find answered: its points and badges go through the unlock overlay.
     func applyDailyScore(_ score: FindScoreAward?) {
         if let unlocked = awardsService.applyAward(score), pendingAwardUnlock == nil {
@@ -174,6 +235,7 @@ final class SearchViewModel: ObservableObject {
         searchStage = "planning"
         checkingPageCount = 0
         searchStartedAt = Date()
+        startNotifyOffer()
         errorMessage = ""
         summaryText = ""
         detectEntity(trimmed)
@@ -235,6 +297,7 @@ final class SearchViewModel: ObservableObject {
                 FindSpeaker.shared.speak(answer.spoken)
             }
             dailyStore.noteSearch(resolvedResponse.daily)
+            finishReadyNotice(query: trimmed, succeeded: true)
             // Find Score: the backend's points when it scored the search,
             // else the old on-device count.
             if let score = resolvedResponse.score {
@@ -254,6 +317,7 @@ final class SearchViewModel: ObservableObject {
             }
         } catch {
             guard searchID == thisSearch else { return }
+            finishReadyNotice(query: trimmed, succeeded: false)
             if isRefining {
                 // The cards stay; only the details didn't arrive.
                 isRefining = false

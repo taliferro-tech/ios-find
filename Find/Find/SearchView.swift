@@ -443,9 +443,12 @@ struct SearchView: View {
                     answerHomeView(screenWidth: screenWidth)
                 }
             } else if viewModel.isLoading {
-                TimelineView(.periodic(from: .now, by: 0.1)) { context in
-                    ProgressView("\(viewModel.searchStageText) \(Self.elapsed(since: viewModel.searchStartedAt, at: context.date))s")
-                        .tint(Theme.accent)
+                VStack(spacing: 16) {
+                    TimelineView(.periodic(from: .now, by: 0.1)) { context in
+                        ProgressView("\(viewModel.searchStageText) \(Self.elapsed(since: viewModel.searchStartedAt, at: context.date))s")
+                            .tint(Theme.accent)
+                    }
+                    readyNotice
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
@@ -971,7 +974,32 @@ struct SearchView: View {
     // coordinator's `didFinishAnimating`; a shelf-chevron tap already calls
     // `viewModel.select(...)` directly, and `FindResultPagerView` notices
     // the mismatch next render and animates the same slide to it.
+    /// "Let me know when it's ready" on a slow search.
+    @ViewBuilder
+    private var readyNotice: some View {
+        if viewModel.notifyOffer {
+            if viewModel.notifyWhenReady {
+                Text("We\u{2019}ll let you know. Feel free to leave Find.")
+                    .font(Theme.font(13))
+                    .foregroundStyle(Theme.muted)
+            } else {
+                Button {
+                    viewModel.requestReadyNotice()
+                } label: {
+                    Label("Let me know when it\u{2019}s ready", systemImage: "bell")
+                        .font(Theme.font(13, weight: .bold))
+                        .foregroundStyle(Theme.accent)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 7)
+                        .overlay(Capsule().stroke(Theme.border, lineWidth: 1))
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
     /// Results first: the cards are up and Find is still checking their pages.
+    @ViewBuilder
     private var refiningStatus: some View {
         TimelineView(.periodic(from: .now, by: 0.1)) { context in
             HStack(spacing: 8) {
@@ -985,6 +1013,8 @@ struct SearchView: View {
             .padding(.bottom, 6)
             .accessibilityElement(children: .combine)
         }
+        readyNotice
+            .padding(.bottom, 6)
     }
 
     private static func elapsed(since start: Date, at now: Date) -> String {
