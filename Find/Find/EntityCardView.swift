@@ -6,7 +6,7 @@ import SwiftUI
 struct EntityCardView: View {
     /// Every type drawn below. The app sends it with each detect request, so
     /// the backend never sends a card this version can't draw.
-    static let cardTypes = ["word", "sports", "store", "restaurant", "service", "shop", "country", "state", "city", "movie", "tv", "artist", "album", "song", "company", "product", "corporation", "item"]
+    static let cardTypes = ["word", "sports", "store", "restaurant", "service", "shop", "country", "state", "city", "movie", "tv", "artist", "album", "song", "company", "product", "corporation", "item", "howto"]
 
     let entity: FindEntity
     let query: String
@@ -24,6 +24,8 @@ struct EntityCardView: View {
                 switch entity.type {
                 case "word":
                     EntityWordCard(entity: entity, fetch: fetch, onSearch: onSearch)
+                case "howto":
+                    EntityHowToCard(entity: entity, fetch: fetch)
                 case "sports":
                     EntitySportsCard(entity: entity, fetch: fetch)
                 case "store", "restaurant", "service":
@@ -64,6 +66,7 @@ struct EntitySportsCard: View {
     private var leaders: FindSportsLeadersSection? { sections.value("leaders", as: FindSportsLeadersSection.self) }
     private var news: FindEntityNewsSection? { sections.value("news", as: FindEntityNewsSection.self) }
     private var summary: FindEntitySummary? { sections.value("summary", as: FindEntitySummary.self) }
+    private var videos: FindTeamVideos? { sections.value("videos", as: FindTeamVideos.self) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
@@ -149,9 +152,14 @@ struct EntitySportsCard: View {
                 }
             }
 
+            // The team's latest videos behind curtains; none hides the row.
+            if let videos, !videos.videos.isEmpty {
+                EntityTeamVideosRow(row: videos)
+            }
+
             EntityActionTiles(actions: actions)
         }
-        .task { await sections.load(["team", "games", "leaders", "news", "summary"], fetch: fetch) }
+        .task { await sections.load(["team", "games", "leaders", "news", "summary", "videos"], fetch: fetch) }
         // Scores refresh every 30 s while a game is on; a failed refresh keeps the last score.
         .task(id: games?.live?.id) {
             guard games?.live != nil else { return }

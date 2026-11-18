@@ -526,9 +526,22 @@ private struct InlineVideoView: View {
 }
 
 /// YouTube's embed, inline. The page is loaded with find.16ahead.com as its
-/// origin: YouTube refuses to play an embed that has none.
-private struct YouTubeEmbedView: UIViewRepresentable {
+/// origin: YouTube refuses to play an embed that has none. The how-to and
+/// team video cards use the no-cookie host; a new `start` or `reload` loads
+/// the embed again from that second (a chapter jump). Removing the view
+/// unloads the page, which stops the video.
+struct YouTubeEmbedView: UIViewRepresentable {
     let videoID: String
+    var noCookie = false
+    var start = 0
+    /// Bumped to load the embed again at `start`, even when it hasn't changed.
+    var reload = 0
+
+    final class Coordinator {
+        var loaded: String?
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
 
     func makeUIView(context: Context) -> WKWebView {
         let configuration = WKWebViewConfiguration()
@@ -538,15 +551,32 @@ private struct YouTubeEmbedView: UIViewRepresentable {
         view.isOpaque = false
         view.backgroundColor = .black
         view.scrollView.isScrollEnabled = false
-        // Built from the id alone, so only YouTube's own embed can load.
-        let html = """
-        <!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1">
-        <style>html,body{margin:0;height:100%;background:#000}iframe{position:fixed;inset:0;width:100%;height:100%;border:0}</style></head>
-        <body><iframe src="https://www.youtube.com/embed/\(videoID)?autoplay=1&playsinline=1&rel=0" allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowfullscreen></iframe></body></html>
-        """
-        view.loadHTMLString(html, baseURL: FindWebURL.site)
+        load(view, context: context)
         return view
     }
 
-    func updateUIView(_ view: WKWebView, context: Context) {}
+    func updateUIView(_ view: WKWebView, context: Context) {
+        load(view, context: context)
+    }
+
+    static func dismantleUIView(_ view: WKWebView, coordinator: Coordinator) {
+        view.stopLoading()
+        view.loadHTMLString("", baseURL: nil)
+    }
+
+    private func load(_ view: WKWebView, context: Context) {
+        let key = "\(videoID)|\(start)|\(reload)"
+        guard context.coordinator.loaded != key else { return }
+        context.coordinator.loaded = key
+        // Built from the id alone, so only YouTube's own embed can load.
+        let id = videoID.addingPercentEncoding(withAllowedCharacters: .alphanumerics.union(CharacterSet(charactersIn: "-_"))) ?? ""
+        let host = noCookie ? "www.youtube-nocookie.com" : "www.youtube.com"
+        let from = start > 0 ? "&start=\(start)" : ""
+        let html = """
+        <!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1">
+        <style>html,body{margin:0;height:100%;background:#000}iframe{position:fixed;inset:0;width:100%;height:100%;border:0}</style></head>
+        <body><iframe src="https://\(host)/embed/\(id)?autoplay=1&playsinline=1&rel=0\(from)" allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowfullscreen></iframe></body></html>
+        """
+        view.loadHTMLString(html, baseURL: FindWebURL.site)
+    }
 }
