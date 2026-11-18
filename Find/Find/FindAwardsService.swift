@@ -11,7 +11,7 @@ import Combine
 // backend can't be reached, so nobody sees their awards vanish.
 enum FindAwardIcon: String, Codable {
     case rebel, curious, nightOwl, earlyBird, connector, sharpEye, explorer, specialist, relentless, tastemaker, legend
-    case streak, collector, allCards, rank
+    case streak, collector, allCards, rank, daily
 
     /// The backend's icon names ("night-owl", "all-cards").
     init(backend name: String) {
@@ -30,6 +30,7 @@ enum FindAwardIcon: String, Codable {
         case "streak": self = .streak
         case "all-cards": self = .allCards
         case "rank": self = .rank
+        case "daily": self = .daily
         default: self = .collector
         }
     }

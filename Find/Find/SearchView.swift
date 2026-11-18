@@ -9,6 +9,8 @@ struct SearchView: View {
     @State private var selectedTab: BottomTab = .home
     @State private var showingShareSheet = false
     @State private var showingSearchScreen = true
+    /// Daily Find sheet (home entry, and the banner while playing).
+    @State private var showingDaily = false
     @State private var enteringNewSearch = false
     @State private var resultSearchQuery = ""
     @State private var highlightedPill = ""
@@ -157,6 +159,16 @@ struct SearchView: View {
                 if let url = preparedShareURL ?? currentShareURL {
                     ShareSheet(items: [url])
                 }
+            }
+            .sheet(isPresented: $showingDaily) {
+                DailyFindView(
+                    store: viewModel.dailyStore,
+                    onSearch: { query in
+                        selectedTab = .home
+                        runSearchFromHome(query)
+                    },
+                    onScore: { score in viewModel.applyDailyScore(score) }
+                )
             }
         }
         .ignoresSafeArea(.keyboard, edges: .bottom)
@@ -315,6 +327,27 @@ struct SearchView: View {
                 }
 
                 quickActionsGrid
+
+                // Daily Find: today's question for everyone.
+                Button {
+                    showingDaily = true
+                } label: {
+                    HStack(spacing: 12) {
+                        Image(systemName: "calendar")
+                            .font(.system(size: 18, weight: .semibold))
+                            .foregroundStyle(Theme.accent)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Daily Find").font(Theme.font(15, weight: .bold)).foregroundStyle(Theme.text)
+                            Text("Today\u{2019}s question for everyone").font(Theme.font(13)).foregroundStyle(Theme.subtext)
+                        }
+                        Spacer()
+                        Image(systemName: "chevron.right").foregroundStyle(Theme.subtext)
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 12)
+                    .background(Theme.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                }
+                .buttonStyle(.plain)
 
                 // Find Score: rank and streak, opening Awards.
                 if let profile = awardsService.profile {
@@ -861,6 +894,26 @@ struct SearchView: View {
 
             if viewModel.isRefining {
                 refiningStatus
+            }
+
+            // Daily Find: back to today's question while playing it.
+            if viewModel.dailyStore.playingDate != nil {
+                Button {
+                    showingDaily = true
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "calendar")
+                        Text("Daily Find: found it? ") + Text("Answer").bold().foregroundColor(Theme.accent)
+                    }
+                    .font(Theme.font(14))
+                    .foregroundStyle(Theme.text)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 10)
+                    .background(Theme.accent.opacity(0.14), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                }
+                .buttonStyle(.plain)
+                .padding(.horizontal, 16)
+                .padding(.bottom, 6)
             }
 
             if viewModel.searchResponse?.queryType == .local {
