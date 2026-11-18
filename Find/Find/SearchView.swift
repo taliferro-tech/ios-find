@@ -387,9 +387,11 @@ struct SearchView: View {
                     answerHomeView(screenWidth: screenWidth)
                 }
             } else if viewModel.isLoading {
-                ProgressView("Finding the strongest result…")
-                    .tint(Theme.accent)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                TimelineView(.periodic(from: .now, by: 0.1)) { context in
+                    ProgressView("\(viewModel.searchStageText) \(Self.elapsed(since: viewModel.searchStartedAt, at: context.date))s")
+                        .tint(Theme.accent)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 Spacer()
             }
@@ -834,6 +836,10 @@ struct SearchView: View {
         VStack(spacing: 0) {
             resultPager(screenWidth: screenWidth)
 
+            if viewModel.isRefining {
+                refiningStatus
+            }
+
             if viewModel.searchResponse?.queryType == .local {
                 OpenNowButton(isOn: viewModel.isOpenNowSearch) {
                     Task { await viewModel.toggleOpenNow() }
@@ -856,6 +862,8 @@ struct SearchView: View {
                     }
                 }
             }
+            // The rating row waits for the full response (results first).
+            .environment(\.findRefining, viewModel.isRefining)
             .overlay {
                 if viewModel.isLoading {
                     ZStack {
@@ -886,6 +894,26 @@ struct SearchView: View {
     // coordinator's `didFinishAnimating`; a shelf-chevron tap already calls
     // `viewModel.select(...)` directly, and `FindResultPagerView` notices
     // the mismatch next render and animates the same slide to it.
+    /// Results first: the cards are up and Find is still checking their pages.
+    private var refiningStatus: some View {
+        TimelineView(.periodic(from: .now, by: 0.1)) { context in
+            HStack(spacing: 8) {
+                ProgressView().controlSize(.small)
+                Text("\(viewModel.searchStageText) \(Self.elapsed(since: viewModel.searchStartedAt, at: context.date))s")
+                    .font(Theme.font(13))
+                    .foregroundStyle(Theme.muted)
+                    .monospacedDigit()
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.bottom, 6)
+            .accessibilityElement(children: .combine)
+        }
+    }
+
+    private static func elapsed(since start: Date, at now: Date) -> String {
+        String(format: "%.1f", max(0, now.timeIntervalSince(start)))
+    }
+
     private var pagingIndexBinding: Binding<Int> {
         Binding(
             get: { viewModel.viewingGroundedAnswer ? -1 : selectedResultIndex },
