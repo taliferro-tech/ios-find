@@ -594,6 +594,8 @@ struct FindWatch: Decodable, Identifiable, Hashable {
     let lastChange: FindWatchChange?
     let changed: Bool
     let current: String
+    /// A game watch: which game and which alerts.
+    var game: FindGameWatch? = nil
 }
 
 struct FindWatchChange: Decodable, Hashable {
@@ -610,6 +612,7 @@ struct FindWatchRequest: Encodable {
     var queryType: String? = nil
     var address: String? = nil
     var phone: String? = nil
+    var game: FindGameWatch? = nil
     var apnsToken: String? = nil
     var environment: String? = nil
 }

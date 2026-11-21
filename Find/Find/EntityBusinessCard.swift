@@ -156,57 +156,106 @@ struct EntityBusinessCard: View {
     // MARK: Open, closing soon, closed (in the place's own time zone)
 
     private func status(at now: Date) -> (text: String, tone: String)? {
-        guard let location = place?.nearest, let openNow = location.openNow else { return nil }
-        if location.open24Hours == true {
-            return (entity.type == "service" ? "Available now · open 24 hours" : "Open 24 hours", "green")
-        }
-        if openNow {
-            if let closes = FindEntityFormat.date(location.nextCloseTime) {
-                let minutes = Int(closes.timeIntervalSince(now) / 60)
-                if minutes > 0 && minutes <= 60 {
-                    return ("Closes in \(minutes) min · open until \(placeTime(closes, location))", "yellow")
-                }
-                return ("Open now · until \(placeTime(closes, location))", "green")
-            }
-            return ("Open now", "green")
-        }
-        if let opens = FindEntityFormat.date(location.nextOpenTime) {
-            let sameDay = placeCalendar(location).isDate(opens, inSameDayAs: now)
-            let when = sameDay ? placeTime(opens, location) : "\(FindEntityFormat.format(opens, "EEE", timeZone: placeZone(location))) \(placeTime(opens, location))"
-            return ("Closed · opens \(when)", "plain")
-        }
-        return ("Closed", "plain")
+        guard let location = place?.nearest else { return nil }
+        return EntityPlaceHours.status(location, at: now, isService: entity.type == "service").map { ($0.text, $0.tone) }
     }
 
-    private func placeZone(_ location: FindPlaceLocation) -> TimeZone {
-        location.utcOffsetMinutes.flatMap { TimeZone(secondsFromGMT: $0 * 60) } ?? .current
-    }
+    private func todayIndex(_ location: FindPlaceLocation) -> Int { EntityPlaceHours.todayIndex(location) }
 
-    private func placeCalendar(_ location: FindPlaceLocation) -> Calendar {
-        var calendar = Calendar(identifier: .gregorian)
-        calendar.timeZone = placeZone(location)
-        return calendar
-    }
-
-    /// "9 PM", "9:30 PM".
-    private func placeTime(_ date: Date, _ location: FindPlaceLocation) -> String {
-        FindEntityFormat.format(date, "jmm", timeZone: placeZone(location)).replacingOccurrences(of: ":00", with: "")
-    }
-
-    /// Monday = 0, as Places lists the week.
-    private func todayIndex(_ location: FindPlaceLocation) -> Int {
-        (placeCalendar(location).component(.weekday, from: Date()) + 5) % 7
-    }
-
-    /// "10:00 AM – 9:00 PM" -> "10 AM – 9 PM".
-    private func shortHours(_ hours: String) -> String {
-        hours.replacingOccurrences(of: #":00(?=\s?[AP]M)"#, with: "", options: .regularExpression)
-    }
+    private func shortHours(_ hours: String) -> String { EntityPlaceHours.shortHours(hours) }
 
     private func openText(_ location: FindPlaceLocation) -> String {
         if location.open24Hours == true { return "Open 24 hours" }
         guard let open = location.openNow else { return "" }
         return open ? "Open now" : "Closed"
+    }
+}
+
+/// Open, closing soon or closed, in the place's own time zone: shared by the
+/// business card and the restaurant and store page (web: the business card's
+/// status, which find-place-page extends).
+enum EntityPlaceHours {
+    struct Status {
+        /// "Open now · until 9 PM", "Closes in 12 min · open until 9 PM", "Closed · opens Tue 9 AM".
+        let text: String
+        /// "Open now", "Closes in 12 min", "Closed".
+        let short: String
+        /// green, yellow (closing soon) or plain (closed).
+        let tone: String
+    }
+
+    static func status(_ location: FindPlaceLocation, at now: Date, isService: Bool = false) -> Status? {
+        guard let openNow = location.openNow else { return nil }
+        if location.open24Hours == true {
+            return Status(text: isService ? "Available now · open 24 hours" : "Open 24 hours", short: "Open 24 hours", tone: "green")
+        }
+        if openNow {
+            if let closes = FindEntityFormat.date(location.nextCloseTime) {
+                let minutes = Int(closes.timeIntervalSince(now) / 60)
+                if minutes > 0 && minutes <= 60 {
+                    return Status(text: "Closes in \(minutes) min · open until \(time(closes, location))", short: "Closes in \(minutes) min", tone: "yellow")
+                }
+                return Status(text: "Open now · until \(time(closes, location))", short: "Open now", tone: "green")
+            }
+            return Status(text: "Open now", short: "Open now", tone: "green")
+        }
+        if let opens = FindEntityFormat.date(location.nextOpenTime) {
+            let sameDay = calendar(location).isDate(opens, inSameDayAs: now)
+            let when = sameDay ? time(opens, location) : "\(FindEntityFormat.format(opens, "EEE", timeZone: zone(location))) \(time(opens, location))"
+            return Status(text: "Closed · opens \(when)", short: "Closed", tone: "plain")
+        }
+        return Status(text: "Closed", short: "Closed", tone: "plain")
+    }
+
+    static func zone(_ location: FindPlaceLocation) -> TimeZone {
+        location.utcOffsetMinutes.flatMap { TimeZone(secondsFromGMT: $0 * 60) } ?? .current
+    }
+
+    static func calendar(_ location: FindPlaceLocation) -> Calendar {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = zone(location)
+        return calendar
+    }
+
+    /// "9 PM", "9:30 PM".
+    static func time(_ date: Date, _ location: FindPlaceLocation) -> String {
+        FindEntityFormat.format(date, "jmm", timeZone: zone(location)).replacingOccurrences(of: ":00", with: "")
+    }
+
+    /// An ISO time as the place's clock reads it ("2 PM"), or "".
+    static func time(_ iso: String?, _ location: FindPlaceLocation) -> String {
+        FindEntityFormat.date(iso).map { time($0, location) } ?? ""
+    }
+
+    /// Monday = 0, as Places lists the week.
+    static func todayIndex(_ location: FindPlaceLocation) -> Int {
+        (calendar(location).component(.weekday, from: Date()) + 5) % 7
+    }
+
+    /// "10:00 AM – 9:00 PM" -> "10 AM – 9 PM".
+    static func shortHours(_ hours: String) -> String {
+        hours.replacingOccurrences(of: #":00(?=\s?[AP]M)"#, with: "", options: .regularExpression)
+    }
+
+    /// "10:00 AM – 2:00 PM, 4:00 – 8:00 PM" -> ["10 AM–2 PM", "4–8 PM"].
+    static func shifts(_ hours: String) -> [String] {
+        hours.components(separatedBy: ",")
+            .map { shift in
+                shift
+                    .replacingOccurrences(of: "\u{2009}", with: " ")
+                    .replacingOccurrences(of: "\u{202f}", with: " ")
+                    .replacingOccurrences(of: #":00(?=\s?[AP]M)"#, with: "", options: .regularExpression)
+                    .replacingOccurrences(of: #":00(?=\s?[–-])"#, with: "", options: .regularExpression)
+                    .replacingOccurrences(of: #"\s*[–-]\s*"#, with: "–", options: .regularExpression)
+                    .trimmingCharacters(in: .whitespaces)
+            }
+            .filter { !$0.isEmpty }
+    }
+
+    /// "10 AM–2 PM · 4–8 PM".
+    static func compactHours(_ hours: String) -> String {
+        let parts = shifts(hours)
+        return parts.isEmpty ? hours : parts.joined(separator: " · ")
     }
 }
 

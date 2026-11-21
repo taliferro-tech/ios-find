@@ -97,6 +97,46 @@ final class FindWatchStore: ObservableObject {
         }
     }
 
+    // MARK: Games ("Watch this game" on the game page)
+
+    /// This device's watch on one game, if it has one.
+    func gameWatch(eventId: String) -> FindWatch? {
+        watches.first { $0.kind == "game" && $0.game?.eventId == eventId && !$0.expired }
+    }
+
+    /// Sets a game's alerts: creating the watch again for the same game
+    /// changes its alerts; no alerts removes it. Returns the reason it
+    /// failed, or nil.
+    func setGameAlerts(query: String, url: String, title: String, game: FindGameWatch) async -> String? {
+        if game.alerts.isEmpty {
+            guard let existing = gameWatch(eventId: game.eventId) else { return nil }
+            do {
+                _ = try await apiClient.watch("find/watches/remove", FindWatchRequest(deviceId: deviceId, id: existing.id))
+                watches.removeAll { $0.id == existing.id }
+                return nil
+            } catch {
+                return "Find couldn’t set that alert right now."
+            }
+        }
+        do {
+            let response = try await apiClient.watch("find/watches", FindWatchRequest(
+                deviceId: deviceId, query: query, url: url, title: title, queryType: "game", game: game
+            ))
+            guard let saved = response.watch else { throw FindAPIError.invalidResponse }
+            watches.removeAll { $0.id == saved.id }
+            watches.insert(saved, at: 0)
+            hasWatches = true
+            await requestNotifications()
+            return nil
+        } catch FindAPIError.httpError(409) {
+            return "You can watch up to \(Self.maxWatches) finds. Remove one to add another."
+        } catch FindAPIError.server(let message) {
+            return message
+        } catch {
+            return "Find couldn’t set that alert right now."
+        }
+    }
+
     func refresh(markSeen: Bool = false) async {
         guard let response = try? await apiClient.watch("find/watches/list", FindWatchRequest(deviceId: deviceId)) else { return }
         watches = response.watches ?? []
@@ -167,10 +207,22 @@ final class FindWatchStore: ObservableObject {
     // MARK: Display
 
     func kindLabel(_ watch: FindWatch) -> String {
-        ["price": "Price", "hours": "Hours", "topic": "New results", "page": "Page"][watch.kind] ?? "Watching"
+        if watch.kind == "game" { return gameAlertsLabel(watch.game?.alerts) }
+        return ["price": "Price", "hours": "Hours", "topic": "New results", "page": "Page"][watch.kind] ?? "Watching"
     }
 
+    /// "Game · kickoff and final", "Game · every score".
+    private func gameAlertsLabel(_ alerts: FindGameWatch.Alerts?) -> String {
+        guard let alerts else { return "Game" }
+        let parts = [alerts.start ? "start" : nil, alerts.scores ? "every score" : nil, alerts.final ? "final" : nil].compactMap { $0 }
+        return parts.isEmpty ? "Game" : "Game · \(parts.joined(separator: " and "))"
+    }
+
+    /// A game watch ends with the game: it can't be renewed.
+    func canRenew(_ watch: FindWatch) -> Bool { watch.kind != "game" }
+
     func status(_ watch: FindWatch) -> String {
+        if watch.kind == "game" && watch.expired { return watch.lastChange?.summary ?? "Game over" }
         if watch.expired { return "Watch ended" }
         if let change = watch.lastChange { return "\(change.summary) · \(Self.relative(change.at))" }
         if let checked = watch.lastCheckedAt { return "No changes yet · checked \(Self.relative(checked))" }
