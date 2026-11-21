@@ -28,6 +28,14 @@ final class FindLocationService: NSObject, CLLocationManagerDelegate {
         CLLocationManager.locationServicesEnabled()
     }
 
+    /// Find already has permission, so asking for the position shows no prompt.
+    var isAuthorized: Bool {
+        switch manager.authorizationStatus {
+        case .authorizedWhenInUse, .authorizedAlways: return true
+        default: return false
+        }
+    }
+
     /// Resolves to the current coordinate, requesting permission first if
     /// needed. Never throws or hangs indefinitely - a denial, restriction, or
     /// timeout resolves to nil.

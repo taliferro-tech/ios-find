@@ -93,6 +93,7 @@ struct ResultPageView: View {
 
                 if !locations.isEmpty {
                     locationsList
+                        .task(id: result?.url) { await fillLocationDistancesIfAllowed() }
                 } else if !businessAddress.isEmpty {
                     Text(businessAddress)
                         .font(Theme.font(14))
@@ -521,6 +522,19 @@ struct ResultPageView: View {
             }
             .sorted { (Double($0.distance?.split(separator: " ").first ?? "") ?? .infinity) < (Double($1.distance?.split(separator: " ").first ?? "") ?? .infinity) }
         deviceLocations = (resultURL, sorted)
+    }
+
+    /// Distances without a tap when Find already has location permission
+    /// (fillLocationDistancesIfAllowed on the web). Never asks: without
+    /// permission, "How far?" stays and the system prompt follows the tap.
+    private func fillLocationDistancesIfAllowed() async {
+        guard canShowLocationDistances else { return }
+        let service = locationService ?? FindLocationService()
+        locationService = service
+        guard service.isAuthorized else { return }
+        await showLocationDistances()
+        // Quietly: a failed fix leaves "How far?" without the Settings note.
+        if deviceLocations?.resultURL != result?.url { distanceNote = "" }
     }
 
     /// "Bonhomie Coffee Bar (at Labour Temple)" reads as "Labour Temple".
