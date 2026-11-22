@@ -37,6 +37,14 @@ enum Theme {
     static let tYellowFg = adaptive(light: 0x6e5700, dark: 0xffe56a)
     static let tGreen = adaptive(light: 0xe0f6e6, dark: 0x0e2c19)
     static let tGreenFg = adaptive(light: 0x17703a, dark: 0x80e2a4)
+    // The game, restaurant and store pages: live / closed (red), closing soon and caution (amber).
+    static let tRed = adaptive(light: 0xfde8e8, dark: 0x3a1214)
+    static let tRedFg = adaptive(light: 0xb4232a, dark: 0xff8f94)
+    static let tAmber = adaptive(light: 0xfff1d6, dark: 0x33240a)
+    static let tAmberFg = adaptive(light: 0x8a5300, dark: 0xffc46b)
+    /// The Find button's indigo: links ("Team card ›", "Recap ›") and chosen options.
+    static let indigo = adaptive(light: 0x4f3bf0, dark: 0xb3a8ff)
+    static let indigoFill = adaptive(light: 0x4f3bf0, dark: 0x5b49f5)
 
     // MARK: Older names, pointed at the new palette
 

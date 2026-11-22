@@ -22,14 +22,17 @@ struct EntityTeamVideosRow: View {
 
     private var videos: [FindTeamVideos.Video] { Array(row.videos.prefix(3)) }
     private var smalls: [Int] { swappedSmalls ?? Array(videos.indices.dropFirst()) }
-    private var palette: CurtainPalette { CurtainPalette(primary: row.colors?.primary, accent: row.colors?.accent) }
+    // A restaurant's food reviews bring their own curtain colours (warm red).
+    private var palette: CurtainPalette {
+        row.curtains.flatMap(CurtainPalette.init(curtains:)) ?? CurtainPalette(primary: row.colors?.primary, accent: row.colors?.accent)
+    }
 
     var body: some View {
         if videos.indices.contains(mainIndex) {
             let main = videos[mainIndex]
             VStack(alignment: .leading, spacing: 8) {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Latest videos")
+                    Text((row.heading ?? "").ifEmpty("Latest videos"))
                         .font(Theme.font(22, weight: .bold))
                         .foregroundStyle(Theme.text)
                     Text(sourceLine)
@@ -93,8 +96,9 @@ struct EntityTeamVideosRow: View {
         }
     }
 
-    /// "The newest from the Chicago Bears and the NFL on YouTube."
+    /// "The newest from the Chicago Bears and the NFL on YouTube.", or the row's own line.
     private var sourceLine: String {
+        if let blurb = row.blurb, !blurb.isEmpty { return blurb }
         let league = (row.league ?? "").trimmingCharacters(in: .whitespaces)
         return "The newest from the \(row.team)\(league.isEmpty ? "" : " and the \(league)") on YouTube."
     }
@@ -288,6 +292,15 @@ struct CurtainPalette {
         c2 = Self.color(Self.mix(base, toward: 1, by: 0.2))
         c3 = Self.color(Self.mix(base, toward: 0, by: 0.6))
         gold = Self.color(trim)
+    }
+
+    /// All four colours given (a restaurant's food reviews); nil if one doesn't read.
+    init?(curtains: FindTeamVideos.Curtains) {
+        guard let c1 = Self.rgb(curtains.c1), let c2 = Self.rgb(curtains.c2), let c3 = Self.rgb(curtains.c3), let gold = Self.rgb(curtains.gold) else { return nil }
+        self.c1 = Self.color(c1)
+        self.c2 = Self.color(c2)
+        self.c3 = Self.color(c3)
+        self.gold = Self.color(gold)
     }
 
     private typealias RGB = (Double, Double, Double)

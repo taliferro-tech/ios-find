@@ -25,6 +25,8 @@ struct FindEntity: Decodable, Equatable, Identifiable {
     let tintFgDark: String?
 
     var isBusiness: Bool { ["store", "restaurant", "service"].contains(type) }
+    /// A restaurant or store gets the richer place page; a local service keeps the business card.
+    var isPlacePage: Bool { ["store", "restaurant"].contains(type) }
     var isRegion: Bool { ["country", "state", "city"].contains(type) }
     var isMedia: Bool { ["movie", "tv"].contains(type) }
     var isMusic: Bool { ["artist", "album", "song"].contains(type) }
@@ -99,6 +101,8 @@ struct FindListRow: Decodable, Hashable {
 struct FindEntitySummary: Decodable {
     let text: String
     let sources: [String]?
+    /// A game's: "preview", "summary" (live) or "recap".
+    var kind: String? = nil
 }
 
 // MARK: Companies and products (design_handoff_find_taliferro_results)
@@ -416,6 +420,86 @@ struct FindPlaceSection: Decodable {
     let serves: [String]?
     let about: String?
     let photoUrl: String?
+    // The richer restaurant and store pages (design_handoff_find_game_restaurant_retail).
+    let photos: [FindPlacePhoto]?
+    let photoCount: Int?
+    let priceRange: String?
+    let placeId: String?
+}
+
+/// A Google Maps photo, credited to whoever took it.
+struct FindPlacePhoto: Decodable, Hashable {
+    let url: String
+    let author: String?
+    let authorUrl: String?
+}
+
+/// Up to ten photos for the photo viewer.
+struct FindPlacePhotos: Decodable {
+    let photos: [FindPlacePhoto]
+    let mapsUrl: String?
+}
+
+/// "What people say": Google's rating and reviews, grouped into themes by 16Ahead.
+struct FindReviewsSection: Decodable {
+    struct Theme: Decodable, Hashable { let text: String; let count: Int; let tone: String }
+    struct Quote: Decodable, Hashable { let text: String; let stars: Double?; let date: String?; let author: String? }
+    let rating: Double?
+    let count: Int?
+    /// How many reviews the themes come from.
+    let grouped: Int?
+    let themes: [Theme]?
+    let quotes: [Quote]?
+    let mapsUrl: String?
+}
+
+/// A restaurant's popular dishes, ranked by how often reviews mention them.
+struct FindDishesSection: Decodable {
+    struct Dish: Decodable, Hashable { let name: String; let note: String?; let price: String? }
+    let dishes: [Dish]
+    let menuUrl: String?
+}
+
+/// A store's quick facts and its 16Ahead Store shop, if it has one.
+struct FindRetailSection: Decodable {
+    struct Shop: Decodable { let name: String; let slug: String; let url: String }
+    let knownFor: String?
+    let madeIn: String?
+    let prices: String?
+    let returns: String?
+    let shipsNationwide: Bool?
+    let fitNote: String?
+    let instagram: String?
+    let shop: Shop?
+}
+
+/// "Shop online": 16Ahead Store best sellers, else the site's own products, else its sale pages.
+struct FindProductsSection: Decodable {
+    struct Product: Decodable, Hashable { let title: String; let price: String?; let imageUrl: String?; let url: String; let stock: String? }
+    let source: String?
+    let title: String?
+    let total: Int?
+    let seeAllUrl: String?
+    let products: [Product]
+}
+
+/// "Ask this store" (POST /find/entity/ask): the store's own 16Ahead Store search.
+struct FindAskResult: Decodable {
+    struct Best: Decodable { let title: String; let price: String?; let imageUrl: String?; let url: String? }
+    struct Referral: Decodable { let store: String; let location: String?; let url: String; let heading: String? }
+    let count: Int
+    let best: Best?
+    let searchUrl: String?
+    let referral: Referral?
+}
+
+struct FindAskRequest: Encodable {
+    let slug: String
+    let query: String
+}
+
+struct FindAskResponse: Decodable {
+    let result: FindAskResult?
 }
 
 struct FindPlaceDetails: Decodable {
@@ -691,9 +775,21 @@ struct FindTeamVideos: Decodable {
         let embeddable: Bool?
     }
 
+    /// A restaurant's food reviews: its own curtain colours.
+    struct Curtains: Decodable {
+        let c1: String
+        let c2: String
+        let c3: String
+        let gold: String
+    }
+
     let team: String
     let league: String?
     let colors: Colors?
+    /// A restaurant's food reviews bring their own heading and line.
+    var heading: String? = nil
+    var blurb: String? = nil
+    var curtains: Curtains? = nil
     let moreUrl: String?
     let videos: [Video]
 }

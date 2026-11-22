@@ -394,6 +394,24 @@ final class SearchViewModel: ObservableObject {
         }
     }
 
+    /// The same, for another game of a series (the game page's switcher).
+    func entityFetcher() -> @Sendable (FindEntity, String) async -> Data? {
+        let client = apiClient
+        let latitude = entityCoordinate?.latitude
+        let longitude = entityCoordinate?.longitude
+        return { entity, section in
+            try? await client.entitySection(entity, section: section, latitude: latitude, longitude: longitude)
+        }
+    }
+
+    /// "Ask this store" on a store page; nil when the store couldn't search.
+    func storeAsker() -> @Sendable (String, String) async -> FindAskResult? {
+        let client = apiClient
+        return { slug, query in
+            try? await client.askStore(slug: slug, query: query)
+        }
+    }
+
     func select(_ result: FindRankedResult) {
         selectedResult = result
         viewingGroundedAnswer = false

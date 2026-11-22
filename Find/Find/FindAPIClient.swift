@@ -192,6 +192,11 @@ final class FindAPIClient: @unchecked Sendable {
         return try JSONSerialization.data(withJSONObject: section)
     }
 
+    /// "Ask this store": the store's own 16Ahead Store search (nil when it couldn't search).
+    func askStore(slug: String, query: String) async throws -> FindAskResult? {
+        try await post(path: "find/entity/ask", payload: FindAskRequest(slug: slug, query: query), responseType: FindAskResponse.self).result
+    }
+
     @discardableResult
     func submitFeedback(_ payload: FindFeedbackRequest) async throws -> FindScoreAward? {
         var request = payload

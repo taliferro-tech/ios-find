@@ -1,12 +1,17 @@
 import SwiftUI
 
+/// Loads a section for another entity (another game of a series).
+typealias EntityFetch = @Sendable (FindEntity, String) async -> Data?
+/// "Ask this store": a 16Ahead Store shop's own search (nil when it couldn't search).
+typealias StoreAsk = @Sendable (String, String) async -> FindAskResult?
+
 /// The single-item card for whatever the query names (web: the entity,
 /// business, shop, region and media cards in find-home). It shows while the
 /// normal search is still running; "More results" swaps in the usual pages.
 struct EntityCardView: View {
     /// Every type drawn below. The app sends it with each detect request, so
     /// the backend never sends a card this version can't draw.
-    static let cardTypes = ["word", "sports", "store", "restaurant", "service", "shop", "country", "state", "city", "movie", "tv", "artist", "album", "song", "company", "product", "corporation", "item", "howto"]
+    static let cardTypes = ["game", "word", "sports", "store", "restaurant", "service", "shop", "country", "state", "city", "movie", "tv", "artist", "album", "song", "company", "product", "corporation", "item", "howto"]
 
     let entity: FindEntity
     let query: String
@@ -17,6 +22,10 @@ struct EntityCardView: View {
     let onMore: () -> Void
     /// A search the card runs itself ("Convert USD to JPY").
     let onSearch: (String) -> Void
+    /// Loads a section for another entity (another game of a series).
+    var fetchEntity: EntityFetch = { _, _ in nil }
+    /// "Ask this store": a 16Ahead Store shop's own search.
+    var askStore: StoreAsk? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
@@ -28,7 +37,11 @@ struct EntityCardView: View {
                     EntityHowToCard(entity: entity, fetch: fetch)
                 case "sports":
                     EntitySportsCard(entity: entity, fetch: fetch)
-                case "store", "restaurant", "service":
+                case "game":
+                    EntityGameCard(entity: entity, query: query, fetch: fetch, fetchEntity: fetchEntity, watchStore: watchStore, onSearch: onSearch)
+                case "store", "restaurant":
+                    EntityPlacePage(entity: entity, fetch: fetch, askStore: askStore)
+                case "service":
                     EntityBusinessCard(entity: entity, fetch: fetch)
                 case "shop":
                     EntityShopCard(entity: entity, query: query, fetch: fetch, watchStore: watchStore)

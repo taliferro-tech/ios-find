@@ -844,7 +844,9 @@ struct SearchView: View {
                     onSearch: { search in
                         viewModel.query = search
                         Task { await viewModel.runSearch() }
-                    }
+                    },
+                    fetchEntity: viewModel.entityFetcher(),
+                    askStore: viewModel.storeAsker()
                 )
                 feedbackRow(meta: entityFooterNote(entity))
             }
@@ -860,6 +862,9 @@ struct SearchView: View {
         switch entity.type {
         case "word": return "Definitions from Wiktionary · CC BY-SA"
         case "sports": return "Scores and stats from ESPN"
+        case "game": return "Schedule, live score and stats from ESPN"
+        case "restaurant": return "Hours, photos and reviews from Google · videos from YouTube"
+        case "store": return "Products from 16Ahead Store · hours and reviews from Google"
         case "shop": return "Products and prices from 16Ahead Store"
         case "country", "state", "city": return "Facts from Wikidata · weather from Open-Meteo"
         case "movie": return "Ratings via OMDb · box office and cast from Wikidata"
@@ -1163,7 +1168,7 @@ struct SearchView: View {
                     .buttonStyle(.plain)
 
                     VStack(alignment: .trailing, spacing: 6) {
-                        if watch.expired || watchStore.daysLeft(watch) <= 5 {
+                        if watchStore.canRenew(watch) && (watch.expired || watchStore.daysLeft(watch) <= 5) {
                             Button(watch.expired ? "Watch again" : "Renew") { Task { await watchStore.renew(watch) } }
                         }
                         Button("Stop") { Task { await watchStore.remove(watch) } }

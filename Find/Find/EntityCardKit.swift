@@ -62,6 +62,8 @@ enum EntityTone {
         case "pink": return (Theme.tPink, Theme.tPinkFg)
         case "violet": return (Theme.tViolet, Theme.tVioletFg)
         case "yellow": return (Theme.tYellow, Theme.tYellowFg)
+        case "red": return (Theme.tRed, Theme.tRedFg)
+        case "amber": return (Theme.tAmber, Theme.tAmberFg)
         default: return (Theme.surface, Theme.text)
         }
     }
@@ -225,6 +227,10 @@ struct EntityKeyFacts: View {
 struct EntitySummaryBlock: View {
     let summary: FindEntitySummary?
     let isLoading: Bool
+    /// "16Ahead summary", or a game's "16Ahead preview" / "16Ahead recap".
+    var title = "16Ahead summary"
+    /// Added after the text (a store's fit note: "Sizes run small.").
+    var extra: String? = nil
 
     var body: some View {
         if let summary {
@@ -234,7 +240,7 @@ struct EntitySummaryBlock: View {
                         .resizable()
                         .scaledToFit()
                         .frame(width: 20, height: 20)
-                    Text("16Ahead summary").font(Theme.font(13, weight: .bold))
+                    Text(title).font(Theme.font(13, weight: .bold))
                     if let sources = summary.sources, !sources.isEmpty {
                         Text("· \(sources.joined(separator: ", "))")
                             .font(Theme.font(13))
@@ -242,7 +248,7 @@ struct EntitySummaryBlock: View {
                             .lineLimit(1)
                     }
                 }
-                Text(summary.text)
+                Text([summary.text, extra].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " "))
                     .font(Theme.font(15))
                     .lineSpacing(4)
                     .fixedSize(horizontal: false, vertical: true)
@@ -403,6 +409,70 @@ struct EntityAction: Identifiable {
         self.systemImage = systemImage
         self.url = nil
         self.run = run
+    }
+}
+
+/// Actions as wrapping pills, the first one blue (the game and place pages,
+/// whose actions are words: "Full box score on ESPN ↗", "Menu & ordering").
+struct EntityPillActions: View {
+    let actions: [EntityAction]
+    /// Opens on the web (shows a ↗).
+    var external: (EntityAction) -> Bool = { $0.url != nil && $0.url?.scheme != "tel" }
+    var showIcons = false
+    @Environment(\.openURL) private var openURL
+
+    var body: some View {
+        if !actions.isEmpty {
+            EntityFlow(spacing: 8) {
+                ForEach(Array(actions.enumerated()), id: \.element.id) { index, action in
+                    Button {
+                        if let run = action.run { run() } else if let url = action.url { openURL(url) }
+                    } label: {
+                        HStack(spacing: 6) {
+                            if showIcons { Image(systemName: action.systemImage).font(.system(size: 14, weight: .semibold)) }
+                            Text(action.label).font(Theme.font(14, weight: .bold)).lineLimit(1)
+                            if !showIcons && external(action) {
+                                Image(systemName: "arrow.up.right").font(.system(size: 11, weight: .bold))
+                            }
+                        }
+                        .foregroundStyle(index == 0 ? .white : Theme.text)
+                        .padding(.horizontal, 16)
+                        .frame(height: 44)
+                        .background(index == 0 ? Theme.blue : Theme.surface, in: Capsule())
+                        .contentShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+    }
+}
+
+/// An uppercase section label (13pt bold, tracked), as the newer pages use.
+struct EntitySectionLabel: View {
+    let text: String
+    var body: some View {
+        Text(text.uppercased())
+            .font(Theme.font(13, weight: .bold))
+            .tracking(1)
+            .foregroundStyle(Theme.muted)
+    }
+}
+
+/// A plain chip in one of the tints ("Live · 3rd quarter", "Open · closes 2 PM").
+struct EntityChip: View {
+    let text: String
+    let tone: String
+
+    var body: some View {
+        let colors = EntityTone.colors(tone)
+        Text(text)
+            .font(Theme.font(13, weight: .bold))
+            .foregroundStyle(colors.foreground)
+            .lineLimit(1)
+            .padding(.horizontal, 12)
+            .frame(height: 28)
+            .background(colors.background, in: Capsule())
     }
 }
 
