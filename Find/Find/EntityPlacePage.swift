@@ -31,6 +31,8 @@ struct EntityPlacePage: View {
     private var products: FindProductsSection? { sections.value("products", as: FindProductsSection.self).flatMap { $0.products.isEmpty ? nil : $0 } }
     private var videos: FindTeamVideos? { sections.value("videos", as: FindTeamVideos.self).flatMap { $0.videos.isEmpty ? nil : $0 } }
     private var nearest: FindPlaceLocation? { place?.nearest }
+    /// A shop from the 16Ahead Store guides (id "listing:<domain>").
+    private var isGuideShop: Bool { entity.id.hasPrefix("listing:") }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 22) {
@@ -48,6 +50,7 @@ struct EntityPlacePage: View {
                 if let shop = retail?.shop, let askStore {
                     PlaceAskStore(shop: shop, accent: Self.storeAccent, ask: askStore)
                 }
+                listingBox
                 shopOnline
             }
 
@@ -93,7 +96,11 @@ struct EntityPlacePage: View {
                         EntityChip(text: (place?.category ?? "").ifEmpty(entity.label ?? (isRestaurant ? "Restaurant" : "Store")), tone: isRestaurant ? "yellow" : "pink")
                         if let chip = openChip(at: context.date) { EntityChip(text: chip.text, tone: chip.tone) }
                         if isRestaurant, let price = place?.priceLevel, !price.isEmpty { EntityChip(text: price, tone: "plain") }
-                        if retail?.shop != nil { EntityChip(text: "On 16Ahead Store", tone: "violet") }
+                        if retail?.shop != nil {
+                            EntityChip(text: "On 16Ahead Store", tone: "violet")
+                        } else if isGuideShop {
+                            EntityChip(text: "In our Store guides", tone: "violet")
+                        }
                     }
                 }
                 Text(entity.name)
@@ -130,16 +137,22 @@ struct EntityPlacePage: View {
         return (status.short, tone)
     }
 
-    /// "★ 4.7  867 reviews  9413 16th Ave SW, Seattle" (restaurant) or "★ 4.9  64 reviews  $$$  Los Angeles, CA" (store).
+    /// "★ 4.7  867 reviews  9413 16th Ave SW, Seattle" (restaurant), "★ 4.9  64 reviews  $$$  Los Angeles, CA" (store)
+    /// or "San Francisco, CA · Shops online" (a guide shop with no storefront).
     private var metaText: Text? {
         guard let place else { return nil }
         var items: [String] = []
         if let rating = place.rating { items.append("\(rating.count.formatted()) reviews") }
-        if isRestaurant {
-            items.append([place.nearest.street, place.nearest.city ?? ""].filter { !$0.isEmpty }.joined(separator: ", "))
+        if let location = place.nearest {
+            if isRestaurant {
+                items.append([location.street, location.city ?? ""].filter { !$0.isEmpty }.joined(separator: ", "))
+            } else {
+                items.append(place.priceLevel ?? "")
+                items.append(cityState(location))
+            }
         } else {
             items.append(place.priceLevel ?? "")
-            items.append(cityState(place.nearest))
+            items.append([place.city ?? "", place.online == true ? "Shops online" : ""].filter { !$0.isEmpty }.joined(separator: " · "))
         }
         items = items.filter { !$0.isEmpty }
         let rest = Text(items.joined(separator: "  "))
@@ -401,6 +414,37 @@ struct EntityPlacePage: View {
             .fixedSize(horizontal: false, vertical: true)
         } else if sections.isLoading("retail") {
             EntitySkeleton(height: 72, radius: 16)
+        }
+    }
+
+    /// A guide shop that hasn't joined 16Ahead Store: ask for it, or claim it.
+    @ViewBuilder
+    private var listingBox: some View {
+        if let listing = retail?.listing {
+            let want = FindWebURL.resolve(listing.wantUrl)
+            let claim = FindWebURL.resolve(listing.claimUrl)
+            if want != nil || claim != nil {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Not on 16Ahead Store yet").font(Theme.font(16, weight: .bold)).foregroundStyle(Theme.text)
+                    if let want {
+                        Link(destination: want) {
+                            Text("Want to buy from them on 16Ahead Store?")
+                                .font(Theme.font(15, weight: .bold))
+                                .foregroundStyle(Theme.indigo)
+                                .multilineTextAlignment(.leading)
+                        }
+                    }
+                    if let claim {
+                        Link(destination: claim) {
+                            Text("Is this your shop? Claim it").font(Theme.font(13)).foregroundStyle(Theme.muted).underline()
+                        }
+                    }
+                }
+                .padding(20)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Theme.bg, in: RoundedRectangle(cornerRadius: 26, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 26, style: .continuous).strokeBorder(Theme.surface, lineWidth: 2))
+            }
         }
     }
 

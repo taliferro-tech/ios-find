@@ -864,6 +864,7 @@ struct SearchView: View {
         case "sports": return "Scores and stats from ESPN"
         case "game": return "Schedule, live score and stats from ESPN"
         case "restaurant": return "Hours, photos and reviews from Google · videos from YouTube"
+        case "store" where entity.id.hasPrefix("listing:"): return "A shop in the 16Ahead Store guides · hours, photos and reviews from Google when it has a storefront"
         case "store": return "Products from 16Ahead Store · hours and reviews from Google"
         case "shop": return "Products and prices from 16Ahead Store"
         case "country", "state", "city": return "Facts from Wikidata · weather from Open-Meteo"

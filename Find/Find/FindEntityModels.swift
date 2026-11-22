@@ -409,7 +409,8 @@ struct FindPlaceDay: Decodable, Hashable {
 }
 
 struct FindPlaceSection: Decodable {
-    let nearest: FindPlaceLocation
+    /// Nil for an online-only shop in the 16Ahead Store guides (no Google Maps listing).
+    let nearest: FindPlaceLocation?
     let others: [FindPlaceLocation]?
     let usedPosition: Bool?
     let rating: FindPlaceRating?
@@ -425,6 +426,10 @@ struct FindPlaceSection: Decodable {
     let photoCount: Int?
     let priceRange: String?
     let placeId: String?
+    // An online-only guide shop: its name, its city ("San Francisco, CA") and online: true.
+    let name: String?
+    let city: String?
+    let online: Bool?
 }
 
 /// A Google Maps photo, credited to whoever took it.
@@ -471,6 +476,9 @@ struct FindRetailSection: Decodable {
     let fitNote: String?
     let instagram: String?
     let shop: Shop?
+    /// A shop in the 16Ahead Store guides that hasn't joined yet: ask for it, or claim it.
+    let listing: Listing?
+    struct Listing: Decodable { let wantUrl: String?; let claimUrl: String? }
 }
 
 /// "Shop online": 16Ahead Store best sellers, else the site's own products, else its sale pages.
