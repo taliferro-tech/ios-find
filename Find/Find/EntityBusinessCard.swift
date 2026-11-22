@@ -103,7 +103,7 @@ struct EntityBusinessCard: View {
 
     private var meta: String {
         guard let place else { return entity.label ?? "" }
-        return [place.category ?? entity.label, [place.nearest.street, place.nearest.city].compactMap { $0 }.joined(separator: ", ")]
+        return [place.category ?? entity.label, [place.nearest?.street, place.nearest?.city ?? place.city].compactMap { $0 }.joined(separator: ", ")]
             .compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
     }
 
@@ -113,7 +113,7 @@ struct EntityBusinessCard: View {
         let firstPrice = details?.services?.first { !($0.price ?? "").isEmpty }
         return [
             place.rating.map { FindKeyFact(value: "★ \(String(format: "%.1f", $0.value))", label: "(\($0.count.formatted()))") },
-            place.nearest.milesText.map { FindKeyFact(value: $0, label: "away") } ?? place.nearest.city.map { FindKeyFact(value: $0, label: "") },
+            place.nearest?.milesText.map { FindKeyFact(value: $0, label: "away") } ?? (place.nearest?.city ?? place.city).map { FindKeyFact(value: $0, label: "") },
             entity.type == "restaurant" ? place.priceLevel.flatMap { $0.isEmpty ? nil : FindKeyFact(value: $0, label: "price") } : nil,
             firstSale.map { FindKeyFact(value: ($0.discount ?? "").ifEmpty($0.title), label: ($0.discount ?? "").isEmpty ? "on sale" : $0.title) },
             firstPrice.map { FindKeyFact(value: $0.price ?? "", label: $0.name) },
