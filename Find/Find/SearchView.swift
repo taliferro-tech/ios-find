@@ -39,9 +39,12 @@ struct SearchView: View {
         case info = "INFO"
         case awards = "AWARDS"
         case share = "SHARE"
+        /// Takes All's place before a search, like the web's Guides tab.
+        case guides = "GUIDES"
 
         var systemImage: String {
             switch self {
+            case .guides: return "book"
             case .home: return "house.fill"
             case .grid: return "square.grid.2x2"
             case .history: return "clock"
@@ -105,6 +108,12 @@ struct SearchView: View {
                         awardsView(screenWidth: geometry.size.width)
                     case .share:
                         shareView(screenWidth: geometry.size.width)
+                    case .guides:
+                        GuidesView(apiClient: viewModel.apiClient, screenWidth: geometry.size.width) {
+                            viewModel.resetSearch()
+                            showingSearchScreen = true
+                            selectedTab = .home
+                        }
                     }
                 }
                 if showStickyPills {
@@ -1781,11 +1790,16 @@ struct SearchView: View {
 
     private func bottomBar(screenWidth: CGFloat, bottomInset: CGFloat) -> some View {
         HStack(spacing: 0) {
-            // In All results, the All button becomes Home so there's an obvious
-            // way back to a new search.
+            // In All results (or Guides), the All button becomes Home so there's
+            // an obvious way back to a new search. Before any search All has
+            // nothing to show, so that slot is Guides (the web's find-home tabs).
             let tabs = BottomTab.allCases
-                .filter { $0 != .home }
-                .map { $0 == .grid && selectedTab == .grid ? BottomTab.home : $0 }
+                .filter { $0 != .home && $0 != .guides }
+                .map { tab -> BottomTab in
+                    guard tab == .grid else { return tab }
+                    if selectedTab == .grid || selectedTab == .guides { return .home }
+                    return viewModel.searchResponse == nil ? .guides : .grid
+                }
             ForEach(tabs, id: \.rawValue) { tab in
                 Button {
                     if tab == .home {
