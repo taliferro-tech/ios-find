@@ -207,6 +207,16 @@ final class FindAPIClient: @unchecked Sendable {
 
     // MARK: Crews
 
+    /// Every live guide (find.16ahead.com/guides as data).
+    func guides() async throws -> FindGuidesIndex {
+        try await post(path: "find/guides", payload: FindGuidesRequest(), responseType: FindGuidesIndex.self)
+    }
+
+    /// One guide with its shops; nil when it was taken down.
+    func guide(path: String) async throws -> FindGuide? {
+        try await post(path: "find/guides/guide", payload: FindGuideRequest(path: path), responseType: FindGuideResponse.self).guide
+    }
+
     func crews() async throws -> [FindCrew] {
         try await post(path: "find/crews", payload: FindCrewRequest(deviceId: FindDevice.id, timeZone: TimeZone.current.identifier), responseType: FindCrewsResponse.self).crews
     }

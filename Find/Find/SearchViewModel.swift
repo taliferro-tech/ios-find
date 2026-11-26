@@ -46,7 +46,7 @@ final class SearchViewModel: ObservableObject {
     let feedbackStore: FindFeedbackStore
     /// Daily Find: today's question (searches while playing count toward it).
     let dailyStore: FindDailyStore
-    private let apiClient: FindAPIClient
+    let apiClient: FindAPIClient
     private let awardsService: FindAwardsService
     private let locationService: FindLocationService
     private let historyKey = "find-history"
