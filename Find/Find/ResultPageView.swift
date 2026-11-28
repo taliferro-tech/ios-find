@@ -22,6 +22,9 @@ struct ResultPageView: View {
 
     @Environment(\.openURL) private var openURL
     @State private var ownImageFailed = false
+    // "Show images": closed until tapped, so no picture downloads unless asked for.
+    @State private var showingImages = false
+    @State private var failedImages: Set<String> = []
     // "How far?" on a business's locations: worked out on the device.
     @State private var deviceLocations: (resultURL: String, locations: [FindBusinessLocation])?
     @State private var locatingDistances = false
@@ -145,6 +148,8 @@ struct ResultPageView: View {
                 }
 
                 referencesSection
+
+                imagesSection
 
                 // 16Ahead Store's "From local stores": shopping searches only, under the result.
                 if response.shoppingIntent == true {
@@ -792,6 +797,116 @@ struct ResultPageView: View {
                 }
             }
         }
+    }
+
+    // MARK: - Images (same rules as the web's Images row)
+
+    private struct SourceImage: Identifiable {
+        let url: String
+        let image: URL
+        let site: String
+        let title: String
+        var id: String { image.absoluteString }
+    }
+
+    private static let maxSourceImages = 8
+
+    /// Pictures from the search's own sources, which already carry their
+    /// page's image, so this costs no extra request. An answer's references
+    /// come first, then the other sources in rank order. Leaves out this
+    /// page's hero picture, Find's own artwork and pictures that failed.
+    /// Off for local places, news and movies (weather, conversions, instant
+    /// answers and entity cards have their own screens).
+    private var sourceImages: [SourceImage] {
+        guard response.queryType != .local, !response.isHeadline, response.movie == nil else { return [] }
+        func normalize(_ url: String) -> String {
+            var value = url.trimmingCharacters(in: .whitespacesAndNewlines)
+            while value.hasSuffix("/") { value.removeLast() }
+            return value
+        }
+        var byURL: [String: FindRankedResult] = [:]
+        for item in response.results where !item.url.isEmpty {
+            byURL[normalize(item.url)] = byURL[normalize(item.url)] ?? item
+        }
+        let referenceItems: [FindRankedResult] = isGroundedAnswerSlide ?
+            (response.answer?.references ?? []).compactMap { byURL[normalize($0.url)] } : []
+        var seen: Set<String> = ownImageURL != nil ? [rawImage] : []
+        var images: [SourceImage] = []
+        for item in referenceItems + response.results {
+            if images.count >= Self.maxSourceImages { break }
+            let image = item.imageUrl.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !image.isEmpty, !Self.isFindFallback(image), !failedImages.contains(image), !seen.contains(image),
+                  let imageURL = URL(string: image) else { continue }
+            seen.insert(image)
+            images.append(SourceImage(url: item.url, image: imageURL, site: item.displayUrl, title: item.title))
+        }
+        return images
+    }
+
+    @ViewBuilder
+    private var imagesSection: some View {
+        let images = sourceImages
+        if !images.isEmpty {
+            if showingImages {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("IMAGES")
+                        .font(Theme.font(13, weight: .bold))
+                        .tracking(0.8)
+                        .foregroundStyle(Theme.muted)
+                    LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: screenWidth >= 600 ? 4 : 2), spacing: 12) {
+                        ForEach(images) { picture in
+                            sourceImageTile(picture)
+                        }
+                    }
+                }
+            } else {
+                Button {
+                    showingImages = true
+                } label: {
+                    Label("Show images (\(images.count))", systemImage: "photo")
+                        .font(Theme.font(15, weight: .semibold))
+                        .foregroundStyle(Theme.text)
+                        .padding(.horizontal, 18)
+                        .padding(.vertical, 10)
+                        .background(Theme.surface, in: Capsule())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
+    private func sourceImageTile(_ picture: SourceImage) -> some View {
+        Button {
+            if let url = URL(string: picture.url) { openURL(url) }
+        } label: {
+            Color.clear
+                .aspectRatio(4.0 / 3.0, contentMode: .fit)
+                .overlay {
+                    AsyncImage(url: picture.image) { phase in
+                        switch phase {
+                        case .success(let image):
+                            image.resizable().scaledToFill()
+                        case .failure:
+                            Theme.surface2.onAppear { failedImages.insert(picture.image.absoluteString) }
+                        default:
+                            Theme.surface2
+                        }
+                    }
+                }
+                .overlay(alignment: .bottomLeading) {
+                    Text(picture.site)
+                        .font(Theme.font(11))
+                        .foregroundStyle(.white)
+                        .lineLimit(1)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 2)
+                        .background(Color.black.opacity(0.6), in: Capsule())
+                        .padding(8)
+                }
+                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(picture.title.isEmpty ? picture.site : picture.title)
     }
 
     // MARK: - Result meta line
